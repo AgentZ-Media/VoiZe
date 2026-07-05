@@ -1,8 +1,9 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { Keyboard, Plus, Trash2 } from "lucide-react";
+import { Keyboard, Pencil, Plus, Trash2 } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -29,6 +30,7 @@ import type {
   Settings,
 } from "../lib/types";
 import ModelSelect from "./ModelSelect";
+import Select from "./Select";
 
 export type SettingsSection =
   | "general"
@@ -150,9 +152,13 @@ function General({
   const [update, setUpdate] = useState<Update | null>(null);
   const [updateStatus, setUpdateStatus] = useState("");
   const [installing, setInstalling] = useState(false);
+  const [version, setVersion] = useState("");
+  // download progress 0..1, or null while indeterminate (server sent no length)
+  const [progress, setProgress] = useState<number | null>(null);
 
   useEffect(() => {
     isEnabled().then(setAutostart).catch(() => setAutostart(null));
+    getVersion().then(setVersion).catch(() => {});
   }, []);
 
   async function toggleAutostart(next: boolean) {
@@ -179,14 +185,37 @@ function General({
   async function installUpdate() {
     if (!update) return;
     setInstalling(true);
+    setProgress(null);
+    let total = 0;
+    let downloaded = 0;
     try {
-      await update.downloadAndInstall();
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case "Started":
+            total = event.data.contentLength ?? 0;
+            downloaded = 0;
+            setProgress(total > 0 ? 0 : null);
+            setUpdateStatus("Lädt herunter…");
+            break;
+          case "Progress":
+            downloaded += event.data.chunkLength;
+            setProgress(total > 0 ? Math.min(1, downloaded / total) : null);
+            break;
+          case "Finished":
+            setProgress(1);
+            setUpdateStatus("Installiert – wird neu gestartet…");
+            break;
+        }
+      });
       await relaunch();
     } catch (e) {
       setInstalling(false);
+      setProgress(null);
       setUpdateStatus(String(e));
     }
   }
+
+  const percent = progress != null ? Math.round(progress * 100) : null;
 
   return (
     <>
@@ -195,15 +224,17 @@ function General({
           label="Fertiger Text"
           hint="Direkt einfügen tippt den Text an der Cursorposition ein."
         >
-          <select
+          <Select
+            ariaLabel="Fertiger Text"
             value={form.output_mode}
-            onChange={(e) =>
-              set({ output_mode: e.target.value as Settings["output_mode"] })
+            onChange={(output_mode) =>
+              set({ output_mode: output_mode as Settings["output_mode"] })
             }
-          >
-            <option value="insert">Direkt einfügen</option>
-            <option value="clipboard">Zwischenablage</option>
-          </select>
+            options={[
+              { value: "insert", label: "Direkt einfügen" },
+              { value: "clipboard", label: "Zwischenablage" },
+            ]}
+          />
         </Row>
         <SwitchRow
           label="Zwischenablage wiederherstellen"
@@ -238,9 +269,17 @@ function General({
       </Group>
 
       <Group title="Updates">
+        <Row label="Aktuelle Version">
+          <span className="version-tag">{version ? `v${version}` : "…"}</span>
+        </Row>
         <Row label="Softwareupdate" hint={updateStatus || "Sucht nach neuen Versionen auf GitHub."}>
           <div className="btn-row">
-            <button type="button" className="push" onClick={() => void checkUpdate()}>
+            <button
+              type="button"
+              className="push"
+              onClick={() => void checkUpdate()}
+              disabled={installing}
+            >
               Prüfen
             </button>
             <button
@@ -253,6 +292,25 @@ function General({
             </button>
           </div>
         </Row>
+        {installing && (
+          <Row
+            wide
+            label={
+              percent != null
+                ? `Lädt herunter… ${percent} %`
+                : progress === 1
+                  ? "Fertig"
+                  : "Lädt herunter…"
+            }
+          >
+            <div className="progress-track">
+              <span
+                className={percent == null ? "indeterminate" : ""}
+                style={percent != null ? { width: `${percent}%` } : undefined}
+              />
+            </div>
+          </Row>
+        )}
       </Group>
     </>
   );
@@ -431,6 +489,10 @@ function Dictionary() {
   const [term, setTerm] = useState("");
   const [replacement, setReplacement] = useState("");
   const [notes, setNotes] = useState("");
+  const [editing, setEditing] = useState<DictionaryEntry | null>(null);
+  const [eTerm, setETerm] = useState("");
+  const [eReplacement, setEReplacement] = useState("");
+  const [eNotes, setENotes] = useState("");
 
   const refresh = () => dictionaryList().then(setEntries).catch(() => {});
   useEffect(() => {
@@ -451,10 +513,39 @@ function Dictionary() {
     refresh();
   }
 
+  function startEdit(entry: DictionaryEntry) {
+    setEditing(entry);
+    setETerm(entry.term);
+    setEReplacement(entry.replacement ?? "");
+    setENotes(entry.notes ?? "");
+  }
+
+  async function saveEdit() {
+    if (!editing || !eTerm.trim()) return;
+    await dictionaryUpsert({
+      id: editing.id,
+      term: eTerm.trim(),
+      replacement: eReplacement.trim() || null,
+      notes: eNotes.trim() || null,
+      priority: editing.priority,
+    });
+    setEditing(null);
+    refresh();
+  }
+
   const onEnter = (e: KeyboardEvent) => {
     if (e.key === "Enter") {
       e.preventDefault();
       void add();
+    }
+  };
+
+  const onEditKey = (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void saveEdit();
+    } else if (e.key === "Escape") {
+      setEditing(null);
     }
   };
 
@@ -517,33 +608,95 @@ function Dictionary() {
       </Group>
       {entries.length > 0 ? (
         <Group title={`${entries.length} ${entries.length === 1 ? "Eintrag" : "Einträge"}`}>
-          {entries.map((entry) => (
-            <div key={entry.id} className="row dictionary-entry">
-              <div className="row-text">
-                <span className="row-label">
-                  {entry.term}
-                  {entry.replacement && (
-                    <span className="dictionary-arrow"> → {entry.replacement}</span>
-                  )}
-                </span>
-                {entry.notes ? (
-                  <span className="row-hint">{entry.notes}</span>
-                ) : !entry.replacement ? (
-                  <span className="row-hint">Achtet auf die Schreibweise</span>
-                ) : null}
+          {entries.map((entry) =>
+            editing?.id === entry.id ? (
+              <div key={entry.id} className="dictionary-edit">
+                <label className="field">
+                  <span className="field-label">Begriff</span>
+                  <input
+                    type="text"
+                    autoFocus
+                    value={eTerm}
+                    onChange={(e) => setETerm(e.target.value)}
+                    onKeyDown={onEditKey}
+                  />
+                </label>
+                <div className="field-pair">
+                  <label className="field">
+                    <span className="field-label">
+                      Ersetzung <em>optional</em>
+                    </span>
+                    <input
+                      type="text"
+                      value={eReplacement}
+                      onChange={(e) => setEReplacement(e.target.value)}
+                      onKeyDown={onEditKey}
+                      placeholder="Korrekte Schreibweise"
+                    />
+                  </label>
+                  <label className="field">
+                    <span className="field-label">
+                      Notiz <em>optional</em>
+                    </span>
+                    <input
+                      type="text"
+                      value={eNotes}
+                      onChange={(e) => setENotes(e.target.value)}
+                      onKeyDown={onEditKey}
+                      placeholder="Nur zur Erinnerung"
+                    />
+                  </label>
+                </div>
+                <div className="dictionary-edit-actions">
+                  <button type="button" className="push" onClick={() => setEditing(null)}>
+                    Abbrechen
+                  </button>
+                  <button
+                    type="button"
+                    className="push primary"
+                    onClick={() => void saveEdit()}
+                    disabled={!eTerm.trim()}
+                  >
+                    Speichern
+                  </button>
+                </div>
               </div>
-              <div className="row-ctl">
-                <button
-                  type="button"
-                  className="ghost"
-                  aria-label="Eintrag löschen"
-                  onClick={() => dictionaryDelete(entry.id).then(refresh)}
-                >
-                  <Trash2 size={13} />
-                </button>
+            ) : (
+              <div key={entry.id} className="row dictionary-entry">
+                <div className="row-text">
+                  <span className="row-label">
+                    {entry.term}
+                    {entry.replacement && (
+                      <span className="dictionary-arrow"> → {entry.replacement}</span>
+                    )}
+                  </span>
+                  {entry.notes ? (
+                    <span className="row-hint">{entry.notes}</span>
+                  ) : !entry.replacement ? (
+                    <span className="row-hint">Achtet auf die Schreibweise</span>
+                  ) : null}
+                </div>
+                <div className="row-ctl">
+                  <button
+                    type="button"
+                    className="ghost"
+                    aria-label="Eintrag bearbeiten"
+                    onClick={() => startEdit(entry)}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    aria-label="Eintrag löschen"
+                    onClick={() => dictionaryDelete(entry.id).then(refresh)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            ),
+          )}
         </Group>
       ) : (
         <p className="dictionary-empty">Noch keine Einträge.</p>

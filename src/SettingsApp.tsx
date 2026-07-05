@@ -1,3 +1,4 @@
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
   Bot,
@@ -25,8 +26,10 @@ const NAV: { id: SettingsSection; label: string; icon: ComponentType<{ size?: nu
 export default function SettingsApp() {
   const [section, setSection] = useState<SettingsSection>("general");
   const [settings, setSettings] = useState<SettingsType | null>(null);
+  const [version, setVersion] = useState("");
 
   useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
     getSettings().then(setSettings).catch(() => {});
     const un = listen<string>("settings-open", (event) => {
       const next = event.payload as SettingsSection;
@@ -63,6 +66,9 @@ export default function SettingsApp() {
             );
           })}
         </nav>
+        <div className="settings-version" data-tauri-drag-region>
+          {version ? `Version ${version}` : ""}
+        </div>
       </aside>
       <main className="settings-content">
         <header className="settings-header" data-tauri-drag-region>
