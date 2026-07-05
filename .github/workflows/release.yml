@@ -36,6 +36,36 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      # Das Zertifikat ist selbstsigniert. tauri-action importiert es zwar, aber
+      # Tauri löst die Identität über `security find-identity -v` (nur GÜLTIGE
+      # Identitäten) auf – und ein selbstsigniertes Zertifikat gilt nur als
+      # gültig, wenn es fürs Code-Signing als vertrauenswürdig markiert ist.
+      # Genau das machen wir hier (Runner haben passwortloses sudo). Die
+      # Vertrauensstellung hängt am Zertifikat, gilt also auch für den
+      # Schlüsselbund, den tauri-action gleich selbst anlegt.
+      - name: Trust self-signed signing certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          P12="$RUNNER_TEMP/voize-cert.p12"
+          PEM="$RUNNER_TEMP/voize-cert.pem"
+          TMP_KC="$RUNNER_TEMP/extract.keychain-db"
+          echo "$APPLE_CERTIFICATE" | base64 --decode > "$P12"
+          # Wegwerf-Schlüsselbund nur, um das öffentliche Zertifikat als PEM
+          # herauszuziehen (kein openssl -> keine LibreSSL/-legacy-Probleme).
+          security create-keychain -p tmp "$TMP_KC"
+          security unlock-keychain -p tmp "$TMP_KC"
+          security import "$P12" -k "$TMP_KC" -P "$APPLE_CERTIFICATE_PASSWORD" -A
+          security find-certificate -c "$APPLE_SIGNING_IDENTITY" -p "$TMP_KC" > "$PEM"
+          sudo security add-trusted-cert -d -r trustRoot -p codeSign \
+            -k /Library/Keychains/System.keychain "$PEM"
+          echo "Vertrauensstellung gesetzt für:"
+          security find-certificate -c "$APPLE_SIGNING_IDENTITY" -p "$TMP_KC" | \
+            openssl x509 -noout -subject 2>/dev/null || true
+
       - name: Build signed Tauri release
         uses: tauri-apps/tauri-action@v1
         env:
@@ -55,5 +85,5 @@ jobs:
           releaseBody: "VoiZe desktop release."
           releaseDraft: false
           prerelease: false
-          includeUpdaterJson: true
+          uploadUpdaterJson: true
           args: ${{ matrix.args }}
