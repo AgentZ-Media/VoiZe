@@ -100,8 +100,9 @@ button:focus-visible {
   width: 168px;
   height: 42px;
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: 8px 1fr;
   align-items: center;
+  gap: 10px;
   padding: 7px 16px;
   border-radius: 999px;
   background:
@@ -110,6 +111,15 @@ button:focus-visible {
   border: 1px solid oklch(1 0 0 / 0.14);
   box-shadow: 0 10px 28px oklch(0 0 0 / 0.38);
   backdrop-filter: blur(18px);
+}
+
+.status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ink-dim);
+  opacity: 0.42;
+  box-shadow: 0 0 0 1px oklch(1 0 0 / 0.08);
 }
 
 .waveform {
@@ -127,16 +137,29 @@ button:focus-visible {
   border-radius: 999px;
   background: linear-gradient(180deg, var(--accent), var(--primary));
   opacity: 0.86;
-  transition: height 80ms linear, opacity 160ms ease;
+  transition: height 32ms linear, opacity 120ms ease;
 }
 
 [data-state="idle"] .waveform span {
   opacity: 0.25;
 }
 
+[data-state="recording"] .status-dot {
+  background: var(--accent);
+  opacity: 0.92;
+  box-shadow: 0 0 12px oklch(0.79 0.12 75 / 0.54);
+}
+
 [data-state="transcribing"] .waveform span,
 [data-state="polishing"] .waveform span {
+  background: linear-gradient(180deg, var(--primary), oklch(0.80 0.10 250));
   animation: indicator-pulse 720ms ease-in-out infinite alternate;
+}
+
+[data-state="transcribing"] .status-dot,
+[data-state="polishing"] .status-dot {
+  background: var(--primary);
+  opacity: 0.9;
 }
 
 [data-state="inserted"] .waveform span,
@@ -144,8 +167,20 @@ button:focus-visible {
   background: var(--success);
 }
 
+[data-state="inserted"] .status-dot,
+[data-state="copied"] .status-dot {
+  background: var(--success);
+  opacity: 0.9;
+}
+
 [data-state="error"] .waveform span {
   background: var(--danger);
+}
+
+[data-state="error"] .status-dot {
+  background: var(--danger);
+  opacity: 1;
+  box-shadow: 0 0 12px oklch(0.69 0.18 24 / 0.5);
 }
 
 .icon-btn {
@@ -626,7 +661,51 @@ button:focus-visible {
 
 .diagnostics dd {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
   user-select: text;
+}
+
+.setup-progress {
+  display: grid;
+  gap: 7px;
+}
+
+.setup-progress p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+.setup-progress-bar {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: oklch(0 0 0 / 0.24);
+}
+
+.setup-progress-bar span {
+  display: block;
+  width: 42%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), var(--accent));
+  transform: translateX(-110%);
+}
+
+.setup-progress.running .setup-progress-bar span {
+  animation: setup-progress 1.15s var(--ease) infinite;
+}
+
+.setup-progress.ready .setup-progress-bar span {
+  width: 100%;
+  background: var(--success);
+  transform: none;
+}
+
+.setup-progress.error .setup-progress-bar span {
+  width: 100%;
+  background: var(--danger);
+  transform: none;
 }
 
 @keyframes indicator-pulse {
@@ -638,6 +717,12 @@ button:focus-visible {
   to {
     opacity: 0.94;
     transform: scaleY(1);
+  }
+}
+
+@keyframes setup-progress {
+  to {
+    transform: translateX(250%);
   }
 }
 

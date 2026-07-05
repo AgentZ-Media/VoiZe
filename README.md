@@ -10,10 +10,11 @@ VoiZe ist eine lokale macOS-Diktier-App in Tauri 2. Sie lebt in der Menüleiste,
 - Push-to-talk Standard wie Wispr Flow: `Fn`, mit `Ctrl+Opt` als robuste Alternative für externe Tastaturen.
 - Hands-free Toggle: `Fn+Space`.
 - Lokale Batch-Transkription über `parakeet-mlx` / NVIDIA Parakeet.
+- Automatische Parakeet-Modellvorbereitung beim ersten Start, mit Fortschrittsanzeige in den Diagnose-Einstellungen.
 - OpenRouter-Nachbearbeitung mit auswählbarem Modell.
 - Persönliches Wörterbuch, lokale Verlaufssuche und lernende Wörterbuch-Vorschläge.
 - Direktes Einfügen per Clipboard + `Cmd+V`, mit Clipboard-Wiederherstellung.
-- Start-/Finish-Sound, waveformartige Aufnahme-Pille, Autostart und Tauri-Updater.
+- Start-/Abschlusssound, waveformartige Aufnahme-Pille, Autostart und Tauri-Updater.
 
 ## Lokale Voraussetzungen
 
@@ -30,6 +31,14 @@ parakeet-mlx audio.wav --model mlx-community/parakeet-tdt-0.6b-v3
 ```
 
 VoiZe ruft intern `scripts/parakeet_transcribe.py` auf. Falls `parakeet-mlx` fehlt, versucht das Skript einen Transformers-Fallback mit `nvidia/parakeet-tdt-0.6b-v3`.
+
+Beim ersten App-Start prüft VoiZe, ob `parakeet-mlx` verfügbar und das Modell vorbereitet ist. Falls nicht, öffnet die App **Einstellungen → Diagnose**, lädt bzw. initialisiert das Parakeet-Modell und aktiviert die Hotkeys erst danach. Das Modell kann dort später auch manuell über **Parakeet-Modell laden** vorbereitet werden.
+
+## Bedienlogik
+
+- Push-to-talk: `Fn` gedrückt halten, sprechen, loslassen. Nach dem Loslassen transkribiert VoiZe lokal und fügt den Text ein.
+- Hands-free: `Fn+Space` einmal drücken zum Starten, erneut drücken zum Stoppen.
+- Während Aufnahme und Verarbeitung erscheint nur die kleine Waveform-Pille. Der fertige Text landet direkt im fokussierten Eingabefeld oder, je nach Einstellung, in der Zwischenablage.
 
 ## Entwickeln
 

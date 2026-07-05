@@ -29,6 +29,7 @@ export const requestAccessibility = () =>
 export const screenContext = () => invoke<ScreenContext>("screen_context");
 
 export const asrStatus = () => invoke<AsrStatus>("asr_status");
+export const prepareAsrModel = () => invoke<void>("prepare_asr_model");
 export const transcribeAudio = (wavB64: string) =>
   invoke<{ text: string; engine: string; duration_ms: number | null }>(
     "transcribe_audio",
@@ -40,6 +41,9 @@ export const deliverText = (
   mode: "insert" | "clipboard",
   restoreClipboard: boolean,
 ) => invoke<string>("deliver_text", { text, mode, restoreClipboard });
+
+export const playStatusSound = (kind: "start" | "stop" | "success" | "error") =>
+  invoke<void>("play_status_sound", { kind });
 
 export const historyInsert = (entry: NewHistoryEntry) =>
   invoke<HistoryEntry>("history_insert", { entry });

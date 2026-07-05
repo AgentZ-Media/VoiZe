@@ -1,4 +1,4 @@
-import { emit } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
@@ -21,8 +21,10 @@ import {
   dictionaryUpsert,
   historyDelete,
   historyList,
+  prepareAsrModel,
   requestAccessibility,
   saveSettings,
+  getSettings,
 } from "../lib/api";
 import type {
   AsrStatus,
@@ -203,7 +205,7 @@ function General({
         <Toggle
           checked={form.finish_sound_enabled}
           onChange={(finish_sound_enabled) => set({ finish_sound_enabled })}
-          label="Finish-Sound"
+          label="Abschlusssound"
         />
         <Toggle
           checked={form.auto_update_on_launch}
@@ -214,7 +216,7 @@ function General({
           checked={Boolean(autostart)}
           onChange={(v) => void toggleAutostart(v)}
           label="Bei Systemstart öffnen"
-          hint={autostart === null ? "Im Dev-Modus eventuell nicht verfügbar." : undefined}
+          hint={autostart === null ? "Im Entwicklungsmodus eventuell nicht verfügbar." : undefined}
         />
       </section>
 
@@ -251,25 +253,25 @@ function Shortcuts({
   return (
     <div className="pane-stack">
       <section className="group">
-        <h2>Push-to-talk</h2>
+        <h2>Zum Diktieren halten</h2>
         <HotkeyCapture
           value={form.hotkey}
           onChange={(hotkey) => set({ hotkey })}
           presets={["Fn", "Ctrl+Opt", "Opt+Cmd"]}
         />
         <p className="hint-line">
-          Wispr Flow nutzt auf Macs standardmäßig Fn. Für externe Tastaturen ist Ctrl+Opt die robuste Alternative.
+          Wispr Flow nutzt auf Macs standardmäßig Fn. Für externe Tastaturen ist Ctrl+Opt die robuste Ausweichoption.
         </p>
       </section>
       <section className="group">
-        <h2>Hands-free</h2>
+        <h2>Einmal drücken</h2>
         <HotkeyCapture
           value={form.hands_free_hotkey}
           onChange={(hands_free_hotkey) => set({ hands_free_hotkey })}
           presets={["Fn+Space", "Ctrl+Opt+Space", "Opt+Space"]}
         />
         <p className="hint-line">
-          Standard ist Fn+Space. Ctrl+Opt+Space wird zusätzlich als robuster Fallback registriert.
+          Standard ist Fn+Space. Ctrl+Opt+Space wird zusätzlich als robuste Ausweichoption registriert.
         </p>
       </section>
     </div>
@@ -353,7 +355,7 @@ function AI({
       <section className="group">
         <h2>OpenRouter</h2>
         <label className="field">
-          <span>API Key</span>
+          <span>API-Schlüssel</span>
           <input
             type="password"
             value={form.openrouter_api_key}
@@ -375,7 +377,7 @@ function AI({
         <Toggle
           checked={form.smart_formatting}
           onChange={(smart_formatting) => set({ smart_formatting })}
-          label="Smart Formatting"
+          label="Intelligente Formatierung"
         />
       </section>
       <section className="group">
@@ -554,12 +556,47 @@ function History() {
 function Diagnostics() {
   const [asr, setAsr] = useState<AsrStatus | null>(null);
   const [access, setAccess] = useState<boolean | null>(null);
+  const [prepare, setPrepare] = useState<{
+    state: "idle" | "running" | "ready" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
 
   const refresh = () => {
     asrStatus().then(setAsr).catch(() => {});
     accessibilityStatus().then(setAccess).catch(() => setAccess(null));
   };
   useEffect(refresh, []);
+
+  useEffect(() => {
+    const un = listen<{ state: "running" | "ready" | "error"; message: string }>(
+      "asr-prepare-status",
+      (event) => {
+        setPrepare(event.payload);
+        if (event.payload.state === "ready") refresh();
+      },
+    );
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  async function prepareModel() {
+    setPrepare({
+      state: "running",
+      message: "Parakeet wird vorbereitet. Der erste Start kann einige Minuten dauern.",
+    });
+    try {
+      await prepareAsrModel();
+      const current = await getSettings();
+      const next = { ...current, asr_model_ready: true };
+      await saveSettings(next);
+      await emit("settings-saved", next);
+      setPrepare({ state: "ready", message: "Lokale Transkription ist bereit." });
+      refresh();
+    } catch (e) {
+      setPrepare({ state: "error", message: String(e) });
+    }
+  }
 
   return (
     <div className="pane-stack">
@@ -570,9 +607,26 @@ function Diagnostics() {
           <dd>{asr?.python ? "gefunden" : "nicht gefunden"}</dd>
           <dt>Parakeet MLX</dt>
           <dd>{asr?.parakeet_mlx ? "bereit" : "fehlt"}</dd>
+          <dt>Skript</dt>
+          <dd>{asr?.script || "wird geprüft"}</dd>
           <dt>Hinweis</dt>
           <dd>{asr?.hint}</dd>
         </dl>
+        <div className={`setup-progress ${prepare.state}`}>
+          <div className="setup-progress-bar">
+            <span />
+          </div>
+          <p>{prepare.message || "Parakeet wird beim ersten Start automatisch vorbereitet."}</p>
+        </div>
+        <button
+          type="button"
+          className="soft-btn"
+          onClick={() => void prepareModel()}
+          disabled={prepare.state === "running"}
+        >
+          <Download size={14} />
+          Parakeet-Modell laden
+        </button>
       </section>
       <section className="group">
         <h2>macOS Berechtigungen</h2>

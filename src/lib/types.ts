@@ -14,6 +14,7 @@ export interface Settings {
   auto_update_on_launch: boolean;
   context_enabled: boolean;
   smart_formatting: boolean;
+  asr_model_ready: boolean;
   custom_instructions: string;
   last_learning_at: string | null;
 }

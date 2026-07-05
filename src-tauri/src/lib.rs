@@ -50,6 +50,10 @@ pub fn run() {
                     api.prevent_close();
                     let _ = window.hide();
                     #[cfg(target_os = "macos")]
+                    let _ = window
+                        .app_handle()
+                        .set_activation_policy(tauri::ActivationPolicy::Accessory);
+                    #[cfg(target_os = "macos")]
                     let _ = window.app_handle().set_dock_visibility(false);
                 }
             }
@@ -57,6 +61,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_exit,
             asr::asr_status,
+            asr::prepare_asr_model,
             asr::transcribe_audio,
             context::screen_context,
             db::history_insert,
@@ -72,6 +77,7 @@ pub fn run() {
             native::accessibility_status,
             native::request_accessibility,
             native::deliver_text,
+            native::play_status_sound,
             native::position_hud,
             native::show_settings,
             openrouter::openrouter_chat,

@@ -6,10 +6,32 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from typing import Optional
 
 
 MODEL_MLX = "mlx-community/parakeet-tdt-0.6b-v3"
 MODEL_HF = "nvidia/parakeet-tdt-0.6b-v3"
+
+
+def expanded_path() -> str:
+    home = Path.home()
+    candidates = [
+        home / ".local" / "bin",
+        home / ".cargo" / "bin",
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        Path("/usr/bin"),
+        Path("/bin"),
+        Path("/usr/sbin"),
+        Path("/sbin"),
+    ]
+    current = os.environ.get("PATH", "")
+    parts = [str(path) for path in candidates if path.exists()]
+    parts.extend([part for part in current.split(os.pathsep) if part])
+    return os.pathsep.join(dict.fromkeys(parts))
+
+
+os.environ["PATH"] = expanded_path()
 
 
 def fail(message: str, code: int = 1) -> None:
@@ -65,18 +87,60 @@ def clean_cli_output(raw: str) -> str:
     return lines[-1]
 
 
-def transcribe_mlx(path: Path) -> str | None:
-    exe = shutil.which("parakeet-mlx")
+def transcribe_mlx(path: Path) -> Optional[str]:
+    exe = shutil.which("parakeet-mlx", path=os.environ["PATH"])
     if not exe:
         return None
-    cmd = [exe, str(path), "--model", MODEL_MLX]
-    try:
-        proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
-    except Exception as exc:
-        fail(f"Could not run parakeet-mlx: {exc}")
-    if proc.returncode != 0:
-        fail(proc.stderr.strip() or proc.stdout.strip() or "parakeet-mlx failed")
-    return clean_cli_output(proc.stdout)
+    with tempfile.TemporaryDirectory(prefix="voize-parakeet-") as tmp:
+        out_dir = Path(tmp)
+        cmd = [
+            exe,
+            str(path),
+            "--model",
+            MODEL_MLX,
+            "--output-format",
+            "json",
+            "--output-dir",
+            str(out_dir),
+            "--output-template",
+            "result",
+            "--chunk-duration",
+            "0",
+        ]
+        try:
+            proc = subprocess.run(cmd, text=True, capture_output=True, check=False)
+        except Exception as exc:
+            fail(f"parakeet-mlx konnte nicht gestartet werden: {exc}")
+        if proc.returncode != 0:
+            fail(proc.stderr.strip() or proc.stdout.strip() or "parakeet-mlx ist fehlgeschlagen")
+        result = out_dir / "result.json"
+        if result.exists():
+            value = json.loads(result.read_text(encoding="utf-8"))
+            return str(value.get("text") or "").strip()
+        return clean_cli_output(proc.stdout)
+
+
+def prepare_mlx() -> None:
+    exe = shutil.which("parakeet-mlx", path=os.environ["PATH"])
+    if not exe:
+        fail("parakeet-mlx ist nicht installiert. Installiere es mit: python3 -m pip install -U parakeet-mlx")
+    import math
+    import wave
+
+    with tempfile.TemporaryDirectory(prefix="voize-prepare-") as tmp:
+        wav_path = Path(tmp) / "prepare.wav"
+        sample_rate = 16000
+        with wave.open(str(wav_path), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            frames = bytearray()
+            for i in range(sample_rate):
+                sample = int(math.sin(2 * math.pi * 440 * i / sample_rate) * 900)
+                frames.extend(sample.to_bytes(2, "little", signed=True))
+            wav.writeframes(bytes(frames))
+        _ = transcribe_mlx(wav_path)
+    print(json.dumps({"ready": True, "engine": "parakeet-mlx"}, ensure_ascii=False))
 
 
 def transcribe_transformers(path: Path) -> str:
@@ -84,8 +148,8 @@ def transcribe_transformers(path: Path) -> str:
         from transformers import pipeline
     except Exception:
         fail(
-            "Local Parakeet is not installed. Recommended on Apple Silicon: "
-            "pip install -U parakeet-mlx. Fallback: pip install -U torch "
+            "Lokales Parakeet ist nicht installiert. Empfohlen auf Apple Silicon: "
+            "python3 -m pip install -U parakeet-mlx. Ausweichoption: python3 -m pip install -U torch "
             "torchaudio transformers accelerate soundfile."
         )
     pipe = pipeline("automatic-speech-recognition", model=MODEL_HF)
@@ -96,11 +160,14 @@ def transcribe_transformers(path: Path) -> str:
 
 
 def main() -> None:
+    if len(sys.argv) == 2 and sys.argv[1] == "--prepare":
+        prepare_mlx()
+        return
     if len(sys.argv) != 2:
-        fail("Usage: parakeet_transcribe.py audio.wav")
+        fail("Aufruf: parakeet_transcribe.py audio.wav")
     audio = Path(sys.argv[1]).expanduser().resolve()
     if not audio.exists():
-        fail(f"Audio file not found: {audio}")
+        fail(f"Audiodatei nicht gefunden: {audio}")
     normalized = normalize_with_ffmpeg(audio)
     text = transcribe_mlx(normalized)
     engine = "parakeet-mlx"

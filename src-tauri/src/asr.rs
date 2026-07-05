@@ -21,11 +21,45 @@ pub struct TranscriptionResult {
     pub duration_ms: Option<i64>,
 }
 
+fn command_path() -> String {
+    let home = std::env::var("HOME").unwrap_or_default();
+    [
+        format!("{home}/.local/bin"),
+        format!("{home}/.cargo/bin"),
+        "/opt/homebrew/bin".into(),
+        "/usr/local/bin".into(),
+        "/usr/bin".into(),
+        "/bin".into(),
+        "/usr/sbin".into(),
+        "/sbin".into(),
+        std::env::var("PATH").unwrap_or_default(),
+    ]
+    .into_iter()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(":")
+}
+
+fn python_command() -> Command {
+    let mut cmd = Command::new("/usr/bin/env");
+    cmd.arg("python3").env("PATH", command_path());
+    cmd
+}
+
 fn script_path(app: &tauri::AppHandle) -> PathBuf {
     if let Ok(resource) = app.path().resource_dir() {
-        let candidate = resource.join("scripts").join("parakeet_transcribe.py");
-        if candidate.exists() {
-            return candidate;
+        let candidates = [
+            resource.join("scripts").join("parakeet_transcribe.py"),
+            resource
+                .join("_up_")
+                .join("scripts")
+                .join("parakeet_transcribe.py"),
+            resource.join("parakeet_transcribe.py"),
+        ];
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate;
+            }
         }
     }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -47,22 +81,24 @@ fn audio_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 #[tauri::command]
 pub fn asr_status(app: tauri::AppHandle) -> AsrStatus {
-    let python = Command::new("python3").arg("--version").output().is_ok();
-    let parakeet_mlx = Command::new("python3")
+    let python = python_command().arg("--version").output().is_ok();
+    let parakeet_mlx = python_command()
         .args(["-m", "parakeet_mlx", "--help"])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false)
-        || Command::new("parakeet-mlx")
+        || Command::new("/usr/bin/env")
+            .env("PATH", command_path())
+            .arg("parakeet-mlx")
             .arg("--help")
             .output()
             .map(|o| o.status.success())
             .unwrap_or(false);
     let script = script_path(&app).to_string_lossy().to_string();
     let hint = if parakeet_mlx {
-        "parakeet-mlx is available.".into()
+        "parakeet-mlx ist verfügbar.".into()
     } else {
-        "Install local ASR with: pip install -U parakeet-mlx".into()
+        "Lokale Transkription installieren mit: python3 -m pip install -U parakeet-mlx".into()
     };
     AsrStatus {
         python,
@@ -70,6 +106,36 @@ pub fn asr_status(app: tauri::AppHandle) -> AsrStatus {
         script,
         hint,
     }
+}
+
+#[tauri::command]
+pub async fn prepare_asr_model(app: tauri::AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let script = script_path(&app);
+        if !script.exists() {
+            return Err(format!("ASR-Skript nicht gefunden: {}", script.display()));
+        }
+        let out = python_command()
+            .arg(&script)
+            .arg("--prepare")
+            .env("PYTHONUTF8", "1")
+            .env("PATH", command_path())
+            .output()
+            .map_err(|e| format!("Lokales Transkriptionssetup konnte nicht gestartet werden: {e}"))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let message = if stderr.trim().is_empty() {
+                stdout.trim().to_string()
+            } else {
+                stderr.trim().to_string()
+            };
+            return Err(message);
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -89,14 +155,15 @@ pub async fn transcribe_audio(
 
         let script = script_path(&app);
         if !script.exists() {
-            return Err(format!("ASR script not found: {}", script.display()));
+            return Err(format!("ASR-Skript nicht gefunden: {}", script.display()));
         }
-        let out = Command::new("python3")
+        let out = python_command()
             .arg(&script)
             .arg(&input)
             .env("PYTHONUTF8", "1")
+            .env("PATH", command_path())
             .output()
-            .map_err(|e| format!("Could not start local ASR: {e}"))?;
+            .map_err(|e| format!("Lokale Transkription konnte nicht gestartet werden: {e}"))?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr);
             return Err(stderr.trim().to_string());
@@ -106,7 +173,7 @@ pub async fn transcribe_audio(
             serde_json::from_str(stdout.trim()).map_err(|e| e.to_string())?;
         let text = value["text"].as_str().unwrap_or("").trim().to_string();
         if text.is_empty() {
-            return Err("Local ASR returned an empty transcript.".into());
+            return Err("Lokale Transkription hat keinen Text zurückgegeben.".into());
         }
         Ok(TranscriptionResult {
             text,

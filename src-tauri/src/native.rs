@@ -13,6 +13,7 @@ use tauri_plugin_clipboard_manager::ClipboardExt;
 
 const HUD_WIDTH: i32 = 180;
 const HUD_HEIGHT: i32 = 54;
+const HUD_BOTTOM_OFFSET: f64 = 218.0;
 
 thread_local! {
     static MONITORS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
@@ -282,6 +283,21 @@ fn send_cmd_v() {
 }
 
 #[tauri::command]
+pub fn play_status_sound(kind: String) {
+    let sound = match kind.as_str() {
+        "start" => "Tink",
+        "stop" => "Pop",
+        "success" => "Glass",
+        "error" => "Basso",
+        _ => "Tink",
+    };
+    let path = format!("/System/Library/Sounds/{sound}.aiff");
+    let _ = std::process::Command::new("/usr/bin/afplay")
+        .arg(path)
+        .spawn();
+}
+
+#[tauri::command]
 pub async fn deliver_text(
     app: tauri::AppHandle,
     text: String,
@@ -300,7 +316,7 @@ pub async fn deliver_text(
         send_cmd_v();
         if restore_clipboard {
             if let Some(old) = previous {
-                std::thread::sleep(Duration::from_millis(650));
+                std::thread::sleep(Duration::from_secs(30));
                 let _ = app.clipboard().write_text(old);
             }
         }
@@ -327,7 +343,7 @@ pub fn position_hud(app: tauri::AppHandle) -> Result<(), String> {
             let y = frame.origin.y + frame.size.height
                 - visible.origin.y
                 - HUD_HEIGHT as f64
-                - 18.0;
+                - HUD_BOTTOM_OFFSET;
             Some((x.round() as i32, y.max(18.0).round() as i32))
         })?;
         if let Some((x, y)) = position {
@@ -347,7 +363,7 @@ pub fn position_hud(app: tauri::AppHandle) -> Result<(), String> {
     let size = monitor.size();
     let pos = monitor.position();
     let x = pos.x + ((size.width as i32 - HUD_WIDTH) / 2).max(0);
-    let y = pos.y + size.height as i32 - HUD_HEIGHT - 128;
+    let y = pos.y + size.height as i32 - HUD_HEIGHT - 328;
     win.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -355,7 +371,10 @@ pub fn position_hud(app: tauri::AppHandle) -> Result<(), String> {
 
 pub fn show_settings_window(app: &tauri::AppHandle) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let _ = app.set_dock_visibility(true);
+    {
+        let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+        let _ = app.set_dock_visibility(true);
+    }
     let Some(win) = app.get_webview_window("settings") else {
         return Ok(());
     };

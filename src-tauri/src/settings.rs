@@ -23,6 +23,7 @@ pub struct Settings {
     pub auto_update_on_launch: bool,
     pub context_enabled: bool,
     pub smart_formatting: bool,
+    pub asr_model_ready: bool,
     pub custom_instructions: String,
     pub last_learning_at: Option<String>,
 }
@@ -39,12 +40,13 @@ impl Default for Settings {
             hotkey: "Fn".into(),
             hands_free_hotkey: "Fn+Space".into(),
             output_mode: "insert".into(),
-            restore_clipboard: true,
+            restore_clipboard: false,
             start_sound_enabled: true,
             finish_sound_enabled: true,
             auto_update_on_launch: true,
             context_enabled: true,
             smart_formatting: true,
+            asr_model_ready: false,
             custom_instructions: String::new(),
             last_learning_at: None,
         }
@@ -124,11 +126,11 @@ fn keychain_set(field: &str, value: &str) -> Result<(), String> {
             "-U",
         ])
         .status()
-        .map_err(|e| format!("Keychain is unavailable: {e}"))?;
+        .map_err(|e| format!("macOS-Keychain ist nicht verfügbar: {e}"))?;
     if status.success() {
         Ok(())
     } else {
-        Err("Could not save OpenRouter key to macOS Keychain.".into())
+        Err("OpenRouter-Schlüssel konnte nicht in der macOS-Keychain gespeichert werden.".into())
     }
 }
 
