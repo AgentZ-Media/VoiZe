@@ -14,6 +14,7 @@ import {
   dictionaryUpsert,
   getSettings,
   historyInsert,
+  hudCollapsed,
   learningCandidates,
   openrouterChat,
   playStatusSound,
@@ -115,6 +116,7 @@ function buildPolishMessages(
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [hudVisible, setHudVisible] = useState(false);
   const [state, setState] = useState<HudState>("idle");
   const [level, setLevel] = useState(0);
   const [visualTick, setVisualTick] = useState(0);
@@ -163,11 +165,37 @@ export default function App() {
     }
   }, [toggleRecording]);
 
+  // The window itself is NEVER hidden: WKWebView pauses rAF/timers for
+  // hidden windows and takes seconds to resume after show(), which froze
+  // the waveform. Instead the pill fades via CSS and the window then
+  // collapses natively (AppKit setFrame) to a 1×1 px dot — a window that
+  // physically isn't there can't swallow clicks.
+  const shrinkTimer = useRef<number | null>(null);
+
+  const showPill = useCallback(() => {
+    if (shrinkTimer.current) {
+      window.clearTimeout(shrinkTimer.current);
+      shrinkTimer.current = null;
+    }
+    void hudCollapsed(false).catch(() => {});
+    setHudVisible(true);
+  }, []);
+
+  const hidePill = useCallback(() => {
+    setHudVisible(false);
+    if (shrinkTimer.current) window.clearTimeout(shrinkTimer.current);
+    // collapse only after the fade-out finished
+    shrinkTimer.current = window.setTimeout(() => {
+      shrinkTimer.current = null;
+      void hudCollapsed(true).catch(() => {});
+    }, 220);
+  }, []);
+
   const hideSoon = useCallback((delay = 1400) => {
     window.setTimeout(() => {
-      if (phase.current === "idle") void currentWindow.hide();
+      if (phase.current === "idle") hidePill();
     }, delay);
-  }, []);
+  }, [hidePill]);
 
   useEffect(() => {
     if (state === "idle") return undefined;
@@ -293,8 +321,14 @@ export default function App() {
 
   useEffect(() => {
     // position once at launch — afterwards the pill stays wherever the
-    // user drags it (for this session)
-    void positionHud().catch(() => {});
+    // user drags it (for this session). The window becomes visible now
+    // (pill transparent) and stays visible so the webview never sleeps;
+    // hidePill immediately shrinks it out of the way.
+    void positionHud()
+      .catch(() => {})
+      .then(() => currentWindow.show())
+      .then(() => hidePill())
+      .catch(() => {});
     getSettings()
       .then((s) => {
         settingsRef.current = s;
@@ -347,7 +381,7 @@ export default function App() {
       ? screenContext().catch(() => null)
       : Promise.resolve(null);
     try {
-      await currentWindow.show().catch(() => {});
+      showPill();
       if (activeSettings.start_sound_enabled) void playStatusSound("start");
       await recorder.current.start(setLevel);
       phase.current = "recording";
@@ -386,7 +420,7 @@ export default function App() {
       if (recording.durationMs < MIN_RECORD_MS || !recording.pcmB64) {
         setCaption("Zu kurz");
         setState("idle");
-        void currentWindow.hide();
+        hidePill();
         return;
       }
       const asr = await transcribeAudio(recording.pcmB64);
@@ -414,7 +448,7 @@ export default function App() {
       if (!finalText) {
         setCaption("Nichts erkannt");
         setState("idle");
-        void currentWindow.hide();
+        hidePill();
         return;
       }
       setCaption(activeSettings.output_mode === "clipboard" ? "Kopiert" : "Fügt ein");
@@ -426,7 +460,7 @@ export default function App() {
       if (activeSettings.finish_sound_enabled) void playStatusSound("success");
       // done — the pill disappears the moment the text is delivered
       setState("idle");
-      void currentWindow.hide();
+      hidePill();
       await historyInsert({
         focused_app: activeContext?.app_name ?? null,
         bundle_id: activeContext?.bundle_id ?? null,
@@ -476,22 +510,28 @@ export default function App() {
     setLevel(0);
     setCaption("Abgebrochen");
     setState("idle");
-    void currentWindow.hide();
+    hidePill();
   }
 
   const bars = Array.from({ length: 16 }, (_, i) => {
     const phaseValue = Math.sin(i * 0.72 + visualTick / 110);
     const value =
       state === "recording"
-        ? Math.max(0.12, level * (0.72 + phaseValue * 0.24))
+        ? Math.max(0.1, level * (0.95 + phaseValue * 0.45))
         : state === "transcribing" || state === "polishing"
           ? 0.36 + Math.max(0, phaseValue) * 0.38
           : 0.14;
-    return <span key={i} style={{ height: `${Math.round(6 + value * 24)}px` }} />;
+    return <span key={i} style={{ height: `${Math.round(4 + Math.min(1, value) * 26)}px` }} />;
   });
 
   return (
-    <main className="hud-shell" data-state={state} data-tauri-drag-region aria-label={error || caption}>
+    <main
+      className="hud-shell"
+      data-state={state}
+      data-visible={hudVisible ? "true" : "false"}
+      data-tauri-drag-region
+      aria-label={error || caption}
+    >
       <section className="flow-pill" data-tauri-drag-region>
         <span className="status-dot" aria-hidden />
         <div className="waveform" aria-hidden>

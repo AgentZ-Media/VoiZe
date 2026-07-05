@@ -92,6 +92,10 @@ export class VoiceRecorder {
   /// this instead of an AnalyserNode (WebKit doesn't reliably pull
   /// analysers that aren't on a path to the destination)
   private currentRms = 0;
+  /// slowly decaying peak for adaptive normalization: raw capture (no
+  /// AGC) is quiet and mic levels vary wildly — normalizing against the
+  /// recent peak makes the waveform deflect fully from the first word
+  private peak = 0;
   private chunks: Float32Array[] = [];
   private startedAt = 0;
 
@@ -103,6 +107,7 @@ export class VoiceRecorder {
     if (this.ctx) return;
     this.chunks = [];
     this.currentRms = 0;
+    this.peak = 0;
     this.startedAt = performance.now();
     // Echo cancellation / noise suppression / AGC stay off: WKWebView's
     // audio processing chain ramps up for ~0.6-1 s after the track opens
@@ -155,9 +160,13 @@ export class VoiceRecorder {
 
     const updateLevel = () => {
       if (!this.ctx) return;
-      // raw capture (no AGC) is quieter — scale up for the waveform
-      const target = Math.min(1, this.currentRms * 9.5);
-      this.smoothedLevel = this.smoothedLevel * 0.7 + target * 0.3;
+      this.peak = Math.max(this.currentRms, this.peak * 0.996, 0.01);
+      const norm = Math.min(1, this.currentRms / this.peak);
+      // perceptual curve: quiet speech still moves the bars visibly
+      const target = Math.pow(norm, 0.6);
+      // fast attack, slower release — speech onsets hit immediately
+      const blend = target > this.smoothedLevel ? 0.55 : 0.25;
+      this.smoothedLevel = this.smoothedLevel * (1 - blend) + target * blend;
       onLevel(this.smoothedLevel);
       this.levelFrame = window.requestAnimationFrame(updateLevel);
     };

@@ -18,6 +18,8 @@ export const activationStart = (hotkey: string, handsFreeHotkey: string) =>
   invoke<void>("activation_start", { hotkey, handsFreeHotkey });
 export const activationStop = () => invoke<void>("activation_stop");
 export const positionHud = () => invoke<void>("position_hud");
+export const hudCollapsed = (collapsed: boolean) =>
+  invoke<void>("hud_collapsed", { collapsed });
 export const showSettings = (section?: string) =>
   invoke<void>("show_settings", { section });
 

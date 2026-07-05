@@ -81,6 +81,7 @@ pub fn run() {
             native::accessibility_status,
             native::request_accessibility,
             native::deliver_text,
+            native::hud_collapsed,
             native::play_status_sound,
             native::position_hud,
             native::show_settings,

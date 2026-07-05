@@ -317,8 +317,10 @@ pub async fn deliver_text(
     if !accessibility_trusted() {
         return Ok("clipboard_fallback".into());
     }
+    // fire-and-forget: the caller shouldn't wait for the paste delay or the
+    // clipboard restore — the HUD closes immediately
     tauri::async_runtime::spawn_blocking(move || {
-        std::thread::sleep(Duration::from_millis(90));
+        std::thread::sleep(Duration::from_millis(60));
         send_cmd_v();
         if restore_clipboard {
             if let Some(old) = previous {
@@ -329,10 +331,40 @@ pub async fn deliver_text(
                 let _ = app.clipboard().write_text(old);
             }
         }
-        Ok::<_, String>("insert".into())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    });
+    Ok("insert".into())
+}
+
+/// Collapse the HUD window to a 1×1 px dot (and back). Goes straight to
+/// AppKit: Tauri's setSize silently no-ops on this window type and
+/// setIgnoreCursorEvents is unreliable on macOS (tauri#11461) — a window
+/// that physically isn't there can't swallow clicks. The frame stays
+/// anchored at its bottom-left corner, so expanding restores the exact
+/// previous spot (including manual drags).
+#[tauri::command]
+pub fn hud_collapsed(app: tauri::AppHandle, collapsed: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(win) = app.get_webview_window("main") else {
+            return Ok(());
+        };
+        let ns_ptr = win.ns_window().map_err(|e| e.to_string())? as usize;
+        on_main(&app, move || {
+            let ns_window: &objc2_app_kit::NSWindow =
+                unsafe { &*(ns_ptr as *const objc2_app_kit::NSWindow) };
+            ns_window.setIgnoresMouseEvents(collapsed);
+            let mut frame = ns_window.frame();
+            if collapsed {
+                frame.size.width = 1.0;
+                frame.size.height = 1.0;
+            } else {
+                frame.size.width = HUD_WIDTH as f64;
+                frame.size.height = HUD_HEIGHT as f64;
+            }
+            unsafe { ns_window.setFrame_display(frame, false) };
+        })?;
+    }
+    Ok(())
 }
 
 #[tauri::command]

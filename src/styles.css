@@ -110,6 +110,14 @@ button:focus-visible {
     oklch(0.105 0.006 260 / 0.92);
   border: 1px solid oklch(1 0 0 / 0.14);
   backdrop-filter: blur(18px);
+  transition: opacity 0.16s var(--ease), transform 0.16s var(--ease);
+}
+
+/* the window stays alive — only the pill fades (WKWebView freezes rAF in
+   hidden windows and takes seconds to resume) */
+.hud-shell[data-visible="false"] .flow-pill {
+  opacity: 0;
+  transform: scale(0.9) translateY(5px);
 }
 
 /* children must not swallow mousedown — the pill itself is the drag region */
