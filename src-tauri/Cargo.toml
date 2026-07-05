@@ -18,7 +18,7 @@ block2 = "0.6"
 chrono = "0.4"
 libc = "0.2"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSWorkspace", "NSRunningApplication", "NSPasteboard"] }
+objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSScreen", "NSWorkspace", "NSRunningApplication", "NSPasteboard"] }
 objc2-foundation = { version = "0.3", features = ["NSString", "NSData"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.32", features = ["bundled"] }

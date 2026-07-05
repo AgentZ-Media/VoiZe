@@ -4,11 +4,15 @@ use std::rc::Rc;
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
+use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
-use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSScreen};
 use tauri::{Emitter, Manager, PhysicalPosition};
 use tauri_plugin_clipboard_manager::ClipboardExt;
+
+const HUD_WIDTH: i32 = 180;
+const HUD_HEIGHT: i32 = 54;
 
 thread_local! {
     static MONITORS: RefCell<Vec<Retained<AnyObject>>> = const { RefCell::new(Vec::new()) };
@@ -311,6 +315,28 @@ pub fn position_hud(app: tauri::AppHandle) -> Result<(), String> {
     let Some(win) = app.get_webview_window("main") else {
         return Ok(());
     };
+
+    #[cfg(target_os = "macos")]
+    {
+        let position = on_main(&app, || {
+            let mtm = MainThreadMarker::new()?;
+            let screen = NSScreen::mainScreen(mtm)?;
+            let frame = screen.convertRectToBacking(screen.frame());
+            let visible = screen.convertRectToBacking(screen.visibleFrame());
+            let x = frame.origin.x + ((frame.size.width - HUD_WIDTH as f64) / 2.0).max(0.0);
+            let y = frame.origin.y + frame.size.height
+                - visible.origin.y
+                - HUD_HEIGHT as f64
+                - 18.0;
+            Some((x.round() as i32, y.max(18.0).round() as i32))
+        })?;
+        if let Some((x, y)) = position {
+            win.set_position(PhysicalPosition::new(x, y))
+                .map_err(|e| e.to_string())?;
+            return Ok(());
+        }
+    }
+
     let monitor = win
         .current_monitor()
         .map_err(|e| e.to_string())?
@@ -320,8 +346,8 @@ pub fn position_hud(app: tauri::AppHandle) -> Result<(), String> {
     };
     let size = monitor.size();
     let pos = monitor.position();
-    let x = pos.x + ((size.width as i32 - 760) / 2).max(0);
-    let y = pos.y + size.height as i32 - 156;
+    let x = pos.x + ((size.width as i32 - HUD_WIDTH) / 2).max(0);
+    let y = pos.y + size.height as i32 - HUD_HEIGHT - 128;
     win.set_position(PhysicalPosition::new(x, y))
         .map_err(|e| e.to_string())?;
     Ok(())

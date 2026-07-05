@@ -3,7 +3,6 @@ import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
-import { Copy, Loader2, Mic, Settings as SettingsIcon, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   activationStart,
@@ -17,7 +16,6 @@ import {
   positionHud,
   saveSettings,
   screenContext,
-  showSettings,
   transcribeAudio,
 } from "./lib/api";
 import { VoiceRecorder } from "./lib/recorder";
@@ -105,7 +103,6 @@ export default function App() {
   const [state, setState] = useState<HudState>("idle");
   const [level, setLevel] = useState(0);
   const [caption, setCaption] = useState("Bereit");
-  const [lastText, setLastText] = useState("");
   const [error, setError] = useState("");
   const settingsRef = useRef<Settings | null>(null);
   const recorder = useRef(new VoiceRecorder());
@@ -247,7 +244,6 @@ export default function App() {
     const activeSettings = settingsRef.current;
     if (!activeSettings || recorder.current.running || stopping.current) return;
     setError("");
-    setLastText("");
     setCaption("Hört zu");
     setState("recording");
     contextRef.current = activeSettings.context_enabled
@@ -299,7 +295,6 @@ export default function App() {
       }
 
       finalText = finalText.trim();
-      setLastText(finalText);
       setCaption(activeSettings.output_mode === "clipboard" ? "Kopiert" : "Fügt ein");
       const delivery = await deliverText(
         finalText,
@@ -341,50 +336,18 @@ export default function App() {
     hideSoon(700);
   }
 
-  const bars = Array.from({ length: 20 }, (_, i) => {
+  const bars = Array.from({ length: 16 }, (_, i) => {
     const phase = Math.sin(i * 0.72 + performance.now() / 220);
     const value = state === "recording" ? Math.max(0.12, level * (0.55 + phase * 0.32)) : 0.14;
-    return <span key={i} style={{ height: `${Math.round(8 + value * 32)}px` }} />;
+    return <span key={i} style={{ height: `${Math.round(6 + value * 24)}px` }} />;
   });
 
   return (
-    <main className="hud-shell" data-state={state}>
+    <main className="hud-shell" data-state={state} aria-label={error || caption}>
       <section className="flow-pill">
-        <div className="status-orb" aria-hidden>
-          {state === "polishing" ? (
-            <Sparkles size={16} />
-          ) : state === "transcribing" ? (
-            <Loader2 size={16} />
-          ) : (
-            <Mic size={16} />
-          )}
-        </div>
         <div className="waveform" aria-hidden>
           {bars}
         </div>
-        <div className="hud-copy">
-          <strong>{caption}</strong>
-          <span>{error || lastText || "Fn halten, sprechen, loslassen"}</span>
-        </div>
-        <button
-          className="icon-btn"
-          type="button"
-          aria-label="Letzten Text kopieren"
-          title="Letzten Text kopieren"
-          onClick={() => lastText && deliverText(lastText, "clipboard", false)}
-          disabled={!lastText}
-        >
-          <Copy size={15} />
-        </button>
-        <button
-          className="icon-btn"
-          type="button"
-          aria-label="Einstellungen öffnen"
-          title="Einstellungen"
-          onClick={() => void showSettings("general")}
-        >
-          <SettingsIcon size={15} />
-        </button>
       </section>
     </main>
   );

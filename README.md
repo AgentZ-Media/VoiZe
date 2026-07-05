@@ -90,7 +90,7 @@ xattr -dr com.apple.quarantine "src-tauri/target/release/bundle/macos/VoiZe.app"
 open "src-tauri/target/release/bundle/macos/VoiZe.app"
 ```
 
-Für direktes Einfügen muss VoiZe außerdem in macOS unter **Systemeinstellungen → Datenschutz & Sicherheit → Bedienungshilfen** erlaubt sein.
+Für die Aufnahme muss VoiZe unter **Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon** erlaubt sein. Für direktes Einfügen muss VoiZe außerdem unter **Bedienungshilfen** erlaubt sein.
 
 ## OpenRouter
 

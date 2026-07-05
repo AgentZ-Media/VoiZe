@@ -16,8 +16,8 @@
         "label": "main",
         "title": "VoiZe",
         "url": "index.html",
-        "width": 760,
-        "height": 120,
+        "width": 180,
+        "height": 54,
         "resizable": false,
         "decorations": false,
         "transparent": true,
@@ -63,6 +63,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "macOS": {
+      "infoPlist": "Info.plist"
+    },
     "resources": ["../scripts/parakeet_transcribe.py"],
     "icon": [
       "icons/32x32.png",
