@@ -625,11 +625,16 @@ function Diagnostics() {
       refresh();
     });
     const poll = window.setInterval(refresh, 3000);
+    // Returning from the System Settings pane should reflect a freshly granted
+    // permission at once, not after the next poll tick.
+    const onFocus = () => refresh();
+    window.addEventListener("focus", onFocus);
     return () => {
       void unProgress.then((f) => f());
       void unDone.then((f) => f());
       void unError.then((f) => f());
       window.clearInterval(poll);
+      window.removeEventListener("focus", onFocus);
     };
   }, []);
 
@@ -730,6 +735,21 @@ function Diagnostics() {
             )}
           </div>
         </Row>
+        {access === false && (
+          <div className="row wide">
+            <p className="permission-note">
+              <strong>VoiZe steht schon in der Liste, aber hier weiterhin auf
+              „Nicht erlaubt"?</strong> Dann ist der Eintrag veraltet – nach
+              einem Update ändert sich die App-Signatur, und macOS erkennt die
+              alte Freigabe nicht mehr. So behebst du es dauerhaft: In
+              Systemeinstellungen → Datenschutz &amp; Sicherheit →
+              Bedienungshilfen den vorhandenen VoiZe-Eintrag mit „–" entfernen,
+              danach mit „+" neu hinzufügen (oder den Schalter aus- und wieder
+              einschalten) und VoiZe einmal neu starten. Der Status hier
+              aktualisiert sich automatisch.
+            </p>
+          </div>
+        )}
       </Group>
     </>
   );

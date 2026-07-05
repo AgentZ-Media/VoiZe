@@ -42,6 +42,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Festes (selbstsigniertes) Code-Signing-Zertifikat, damit die
+          # Bedienungshilfe-Berechtigung auch nach Auto-Updates erhalten bleibt.
+          # Bewusst KEINE Notarisierung (APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID
+          # weggelassen) – nur eine stabile Signatur-Identität.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "VoiZe ${{ github.ref_name }}"
