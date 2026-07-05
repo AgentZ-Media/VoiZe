@@ -33,6 +33,12 @@ function getWorkletUrl(): string {
   return workletUrl;
 }
 
+function rms(block: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < block.length; i += 1) sum += block[i] * block[i];
+  return Math.sqrt(sum / block.length);
+}
+
 /// Resample captured Float32 audio to 16 kHz mono and encode as base64
 /// 16-bit PCM. OfflineAudioContext does the band-limited resampling.
 async function toPcm16kBase64(
@@ -77,12 +83,15 @@ export class VoiceRecorder {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
-  private analyser: AnalyserNode | null = null;
   private worklet: AudioWorkletNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private sink: GainNode | null = null;
   private levelFrame = 0;
   private smoothedLevel = 0;
+  /// latest RMS straight from the capture path — the level meter reads
+  /// this instead of an AnalyserNode (WebKit doesn't reliably pull
+  /// analysers that aren't on a path to the destination)
+  private currentRms = 0;
   private chunks: Float32Array[] = [];
   private startedAt = 0;
 
@@ -93,6 +102,7 @@ export class VoiceRecorder {
   async start(onLevel: (value: number) => void): Promise<void> {
     if (this.ctx) return;
     this.chunks = [];
+    this.currentRms = 0;
     this.startedAt = performance.now();
     // Echo cancellation / noise suppression / AGC stay off: WKWebView's
     // audio processing chain ramps up for ~0.6-1 s after the track opens
@@ -108,11 +118,13 @@ export class VoiceRecorder {
     const ctx = new AudioContext();
     await ctx.resume();
     const source = ctx.createMediaStreamSource(stream);
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    analyser.smoothingTimeConstant = 0.62;
     const sink = ctx.createGain();
     sink.gain.value = 0;
+
+    const capture = (block: Float32Array) => {
+      this.chunks.push(block);
+      this.currentRms = rms(block);
+    };
 
     try {
       await ctx.audioWorklet.addModule(getWorkletUrl());
@@ -122,7 +134,7 @@ export class VoiceRecorder {
         channelCount: 1,
       });
       worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
-        this.chunks.push(event.data);
+        capture(event.data);
       };
       source.connect(worklet);
       worklet.connect(sink);
@@ -134,34 +146,25 @@ export class VoiceRecorder {
         const data = event.inputBuffer.getChannelData(0);
         const copy = new Float32Array(data.length);
         copy.set(data);
-        this.chunks.push(copy);
+        capture(copy);
       };
       source.connect(processor);
       processor.connect(sink);
       this.processor = processor;
     }
 
-    const levelBuffer = new Uint8Array(analyser.fftSize);
     const updateLevel = () => {
-      if (!this.analyser) return;
-      this.analyser.getByteTimeDomainData(levelBuffer);
-      let sum = 0;
-      for (let i = 0; i < levelBuffer.length; i += 1) {
-        const sample = (levelBuffer[i] - 128) / 128;
-        sum += sample * sample;
-      }
+      if (!this.ctx) return;
       // raw capture (no AGC) is quieter — scale up for the waveform
-      const target = Math.min(1, Math.sqrt(sum / levelBuffer.length) * 9.5);
+      const target = Math.min(1, this.currentRms * 9.5);
       this.smoothedLevel = this.smoothedLevel * 0.7 + target * 0.3;
       onLevel(this.smoothedLevel);
       this.levelFrame = window.requestAnimationFrame(updateLevel);
     };
-    source.connect(analyser);
     sink.connect(ctx.destination);
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
-    this.analyser = analyser;
     this.sink = sink;
     this.smoothedLevel = 0;
     this.levelFrame = window.requestAnimationFrame(updateLevel);
@@ -176,7 +179,6 @@ export class VoiceRecorder {
     if (this.levelFrame) window.cancelAnimationFrame(this.levelFrame);
     this.levelFrame = 0;
     if (this.worklet) this.worklet.port.onmessage = null;
-    this.analyser?.disconnect();
     this.worklet?.disconnect();
     this.processor?.disconnect();
     this.source?.disconnect();
@@ -185,7 +187,6 @@ export class VoiceRecorder {
     const sampleRate = ctx.sampleRate;
     this.worklet = null;
     this.processor = null;
-    this.analyser = null;
     this.source = null;
     this.sink = null;
     this.stream = null;

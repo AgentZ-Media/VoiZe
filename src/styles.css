@@ -109,8 +109,13 @@ button:focus-visible {
     linear-gradient(180deg, oklch(1 0 0 / 0.10), transparent 48%),
     oklch(0.105 0.006 260 / 0.92);
   border: 1px solid oklch(1 0 0 / 0.14);
-  box-shadow: 0 10px 28px oklch(0 0 0 / 0.38);
   backdrop-filter: blur(18px);
+}
+
+/* children must not swallow mousedown — the pill itself is the drag region */
+.flow-pill .status-dot,
+.flow-pill .waveform {
+  pointer-events: none;
 }
 
 .status-dot {

@@ -292,6 +292,9 @@ export default function App() {
   }, [startRuntime]);
 
   useEffect(() => {
+    // position once at launch — afterwards the pill stays wherever the
+    // user drags it (for this session)
+    void positionHud().catch(() => {});
     getSettings()
       .then((s) => {
         settingsRef.current = s;
@@ -344,7 +347,6 @@ export default function App() {
       ? screenContext().catch(() => null)
       : Promise.resolve(null);
     try {
-      await positionHud().catch(() => {});
       await currentWindow.show().catch(() => {});
       if (activeSettings.start_sound_enabled) void playStatusSound("start");
       await recorder.current.start(setLevel);
@@ -384,7 +386,7 @@ export default function App() {
       if (recording.durationMs < MIN_RECORD_MS || !recording.pcmB64) {
         setCaption("Zu kurz");
         setState("idle");
-        hideSoon(600);
+        void currentWindow.hide();
         return;
       }
       const asr = await transcribeAudio(recording.pcmB64);
@@ -412,7 +414,7 @@ export default function App() {
       if (!finalText) {
         setCaption("Nichts erkannt");
         setState("idle");
-        hideSoon(900);
+        void currentWindow.hide();
         return;
       }
       setCaption(activeSettings.output_mode === "clipboard" ? "Kopiert" : "Fügt ein");
@@ -421,8 +423,10 @@ export default function App() {
         activeSettings.output_mode,
         activeSettings.restore_clipboard,
       );
-      setState(delivery === "insert" ? "inserted" : "copied");
       if (activeSettings.finish_sound_enabled) void playStatusSound("success");
+      // done — the pill disappears the moment the text is delivered
+      setState("idle");
+      void currentWindow.hide();
       await historyInsert({
         focused_app: activeContext?.app_name ?? null,
         bundle_id: activeContext?.bundle_id ?? null,
@@ -442,7 +446,6 @@ export default function App() {
             ? "Kopiert – für direktes Einfügen Bedienungshilfen erlauben"
             : "In der Zwischenablage",
       );
-      hideSoon(delivery === "clipboard_fallback" ? 3200 : 1400);
     } catch (e) {
       setError(String(e));
       setCaption("Fehler");
@@ -473,7 +476,7 @@ export default function App() {
     setLevel(0);
     setCaption("Abgebrochen");
     setState("idle");
-    hideSoon(700);
+    void currentWindow.hide();
   }
 
   const bars = Array.from({ length: 16 }, (_, i) => {
@@ -488,8 +491,8 @@ export default function App() {
   });
 
   return (
-    <main className="hud-shell" data-state={state} aria-label={error || caption}>
-      <section className="flow-pill">
+    <main className="hud-shell" data-state={state} data-tauri-drag-region aria-label={error || caption}>
+      <section className="flow-pill" data-tauri-drag-region>
         <span className="status-dot" aria-hidden />
         <div className="waveform" aria-hidden>
           {bars}
