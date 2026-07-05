@@ -61,7 +61,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             app_exit,
             asr::asr_status,
-            asr::prepare_asr_model,
+            asr::asr_download,
+            asr::asr_cancel_download,
+            asr::asr_remove_model,
+            asr::asr_preload,
+            asr::asr_unload,
             asr::transcribe_audio,
             context::screen_context,
             db::history_insert,

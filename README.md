@@ -1,74 +1,103 @@
+<div align="center">
+
+<img src="app-icon.png" alt="VoiZe" width="110" />
+
 # VoiZe
 
-![VoiZe app icon](app-icon.png)
+**Sprechen statt tippen — überall auf deinem Mac.**
 
-VoiZe ist eine lokale macOS-Diktier-App in Tauri 2. Sie lebt in der Menüleiste, transkribiert lokal mit Parakeet, kann Texte über OpenRouter nachbearbeiten und fügt das Ergebnis direkt in die fokussierte App ein oder legt es in die Zwischenablage.
+Taste halten, sprechen, loslassen. Dein Text erscheint direkt dort, wo dein Cursor steht.
+100 % lokal, ohne Abo, ohne Cloud.
+
+[![Download](https://img.shields.io/github/v/release/AgentZ-Media/VoiZe?label=Download&color=6e56cf&style=for-the-badge)](https://github.com/AgentZ-Media/VoiZe/releases/latest)
+&nbsp;
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-111?style=for-the-badge&logo=apple)
+&nbsp;
+![Privat](https://img.shields.io/badge/Transkription-100%25%20lokal-2da44e?style=for-the-badge)
+
+</div>
+
+---
+
+## So funktioniert's
+
+<table>
+<tr>
+<td align="center" width="33%"><h3>1&nbsp;&nbsp;🎙️</h3><b><kbd>Fn</kbd> gedrückt halten</b><br/><sub>In jeder App — Mail, Browser, Editor, Slack, Terminal. Eine dezente Pille am unteren Bildschirmrand zeigt, dass VoiZe zuhört.</sub></td>
+<td align="center" width="33%"><h3>2&nbsp;&nbsp;💬</h3><b>Einfach sprechen</b><br/><sub>Deutsch, Englisch oder gemischt. Die Spracherkennung läuft komplett auf deinem Mac — nichts verlässt dein Gerät.</sub></td>
+<td align="center" width="33%"><h3>3&nbsp;&nbsp;✨</h3><b>Loslassen — fertig</b><br/><sub>Der Text landet sofort im aktiven Eingabefeld oder in der Zwischenablage. Auf Wunsch von KI ausformuliert.</sub></td>
+</tr>
+</table>
+
+## Warum VoiZe?
+
+|  | **VoiZe** | Wispr Flow | superwhisper | macOS Diktat |
+|---|:---:|:---:|:---:|:---:|
+| **Preis** | **Kostenlos** | Abo | Abo / Kauf | Kostenlos |
+| **Transkription lokal** | ✅ immer | ❌ Cloud | ✅ optional | teilweise |
+| **Funktioniert in jeder App** | ✅ | ✅ | ✅ | eingeschränkt |
+| **Push-to-talk (Taste halten)** | ✅ `Fn` | ✅ | ✅ | ❌ |
+| **KI-Nachbearbeitung** | ✅ optional, eigener API-Key | ✅ | ✅ | ❌ |
+| **Persönliches Wörterbuch** | ✅ lernt automatisch | ✅ | ✅ | ❌ |
+| **Verlauf mit Suche** | ✅ lokal | ✅ Cloud | ✅ | ❌ |
+| **Open Source** | ✅ | ❌ | ❌ | ❌ |
+
+VoiZe nutzt **NVIDIA Parakeet** (eines der präzisesten offenen Sprachmodelle) direkt eingebettet in der App — es gibt **keine Abhängigkeiten**, die du installieren musst. Kein Python, kein Homebrew, kein Terminal. Beim ersten Start lädt VoiZe einmalig das Sprachmodell (~670 MB) und ist danach komplett offline einsatzbereit.
 
 ## Features
 
-- Menüleisten-App ohne Dock-Icon, außer wenn die Einstellungen geöffnet sind.
-- Push-to-talk Standard wie Wispr Flow: `Fn`, mit `Ctrl+Opt` als robuste Alternative für externe Tastaturen.
-- Hands-free Toggle: `Fn+Space`.
-- Lokale Batch-Transkription über `parakeet-mlx` / NVIDIA Parakeet.
-- Automatische Parakeet-Modellvorbereitung beim ersten Start, mit Fortschrittsanzeige in den Diagnose-Einstellungen.
-- OpenRouter-Nachbearbeitung mit auswählbarem Modell.
-- Persönliches Wörterbuch, lokale Verlaufssuche und lernende Wörterbuch-Vorschläge.
-- Direktes Einfügen per Clipboard + `Cmd+V`, mit Clipboard-Wiederherstellung.
-- Start-/Abschlusssound, waveformartige Aufnahme-Pille, Autostart und Tauri-Updater.
+- 🎯 **Direkt einfügen** — der Text erscheint im fokussierten Eingabefeld, alternativ in der Zwischenablage
+- ⚡ **Sofort bereit** — das Modell bleibt im Speicher, Folge-Diktate starten ohne Verzögerung
+- 🧠 **KI-Feinschliff (optional)** — Formatierung, Absätze und Listen über OpenRouter mit deinem eigenen API-Key
+- 📖 **Lernendes Wörterbuch** — Eigennamen und Fachbegriffe werden erkannt und automatisch vorgeschlagen
+- 🕘 **Lokaler Verlauf** — jedes Diktat lässt sich später durchsuchen und erneut kopieren
+- 🔒 **Privat by Design** — Audio wird nie gespeichert und nie hochgeladen
+- 🖥️ **Native Menüleisten-App** — kein Dock-Icon, kein Fenster im Weg, echtes macOS-Material
 
-## Lokale Voraussetzungen
+## Tastenkürzel
+
+| Aktion | Standard | Alternativ |
+|---|---|---|
+| **Diktieren (halten)** | <kbd>Fn</kbd> | <kbd>Ctrl</kbd>+<kbd>Opt</kbd> |
+| **Freihand-Modus (Start/Stopp)** | <kbd>Fn</kbd>+<kbd>Space</kbd> | <kbd>Ctrl</kbd>+<kbd>Opt</kbd>+<kbd>Space</kbd> |
+| **Abbrechen** | <kbd>Esc</kbd> | — |
+
+Alle Kürzel lassen sich in den Einstellungen frei anpassen.
+
+## Installation
+
+1. **[Neueste Version laden](https://github.com/AgentZ-Media/VoiZe/releases/latest)** (`.dmg`) und VoiZe in den Programme-Ordner ziehen.
+2. Da die App noch nicht notarisiert ist, einmalig das Quarantäne-Attribut entfernen:
+   ```bash
+   xattr -dr com.apple.quarantine "/Applications/VoiZe.app"
+   ```
+3. VoiZe starten — die App führt dich durch den einmaligen Modell-Download und fragt die nötigen Berechtigungen an:
+   - **Mikrofon** → für die Aufnahme
+   - **Bedienungshilfen** → damit der Text direkt eingefügt werden kann (ohne diese Berechtigung landet er in der Zwischenablage)
+
+Danach lebt VoiZe in deiner Menüleiste und wartet auf <kbd>Fn</kbd>. Updates installiert die App auf Wunsch selbst.
+
+---
+
+<details>
+<summary><b>🛠️ Für Entwickler</b></summary>
+
+### Stack
+
+Tauri 2 · React · Rust. Die Spracherkennung läuft in-process über [`transcribe-rs`](https://crates.io/crates/transcribe-rs) (Parakeet TDT 0.6b v3, int8 ONNX) — ONNX Runtime wird zur Build-Zeit statisch gelinkt, zur Laufzeit gibt es null externe Abhängigkeiten.
+
+### Entwickeln
 
 ```bash
-brew install ffmpeg
-python3 -m pip install -U parakeet-mlx
 npm install
-```
-
-Der empfohlene lokale ASR-Pfad auf Apple Silicon ist:
-
-```bash
-parakeet-mlx audio.wav --model mlx-community/parakeet-tdt-0.6b-v3
-```
-
-VoiZe ruft intern `scripts/parakeet_transcribe.py` auf. Falls `parakeet-mlx` fehlt, versucht das Skript einen Transformers-Fallback mit `nvidia/parakeet-tdt-0.6b-v3`.
-
-Beim ersten App-Start prüft VoiZe, ob `parakeet-mlx` verfügbar und das Modell vorbereitet ist. Falls nicht, öffnet die App **Einstellungen → Diagnose**, lädt bzw. initialisiert das Parakeet-Modell und aktiviert die Hotkeys erst danach. Das Modell kann dort später auch manuell über **Parakeet-Modell laden** vorbereitet werden.
-
-## Bedienlogik
-
-- Push-to-talk: `Fn` gedrückt halten, sprechen, loslassen. Nach dem Loslassen transkribiert VoiZe lokal und fügt den Text ein.
-- Hands-free: `Fn+Space` einmal drücken zum Starten, erneut drücken zum Stoppen.
-- Während Aufnahme und Verarbeitung erscheint nur die kleine Waveform-Pille. Der fertige Text landet direkt im fokussierten Eingabefeld oder, je nach Einstellung, in der Zwischenablage.
-
-## Entwickeln
-
-```bash
 npm run tauri dev
 ```
 
-Frontend separat:
+Rust separat prüfen: `cd src-tauri && cargo check`
 
-```bash
-npm run dev
-npm run build
-```
+### Release bauen
 
-Rust prüfen:
-
-```bash
-cd src-tauri
-cargo check
-```
-
-## Lokalen Release-Build erstellen
-
-Der Updater braucht eine Tauri-Signatur. Die private Signaturdatei gehört nicht ins Repo.
-
-```bash
-npx tauri signer generate --ci --write-keys ~/.codex/keys/voize-tauri-updater.key --force
-```
-
-Dann bauen:
+Der Updater braucht eine Tauri-Signatur (private Datei, gehört nicht ins Repo):
 
 ```bash
 TAURI_SIGNING_PRIVATE_KEY="$(cat ~/.codex/keys/voize-tauri-updater.key)" \
@@ -76,60 +105,25 @@ TAURI_SIGNING_PRIVATE_KEY_PASSWORD="" \
 npm run tauri build
 ```
 
-Die fertige App liegt danach unter:
+Artefakte: `src-tauri/target/release/bundle/macos/VoiZe.app` und `.../dmg/VoiZe_*.dmg`
 
-```bash
-src-tauri/target/release/bundle/macos/VoiZe.app
-src-tauri/target/release/bundle/dmg/VoiZe_0.1.0_aarch64.dmg
-```
+### Release veröffentlichen
 
-## Unsigned App auf macOS öffnen
-
-Die App ist aktuell nicht notarisiert/signiert. Nach dem Kopieren nach `/Applications` kann macOS sie blockieren. Entferne dann das Quarantine-Attribut:
-
-```bash
-xattr -dr com.apple.quarantine "/Applications/VoiZe.app"
-open "/Applications/VoiZe.app"
-```
-
-Wenn du die App direkt aus dem Build-Ordner startest:
-
-```bash
-xattr -dr com.apple.quarantine "src-tauri/target/release/bundle/macos/VoiZe.app"
-open "src-tauri/target/release/bundle/macos/VoiZe.app"
-```
-
-Für die Aufnahme muss VoiZe unter **Systemeinstellungen → Datenschutz & Sicherheit → Mikrofon** erlaubt sein. Für direktes Einfügen muss VoiZe außerdem unter **Bedienungshilfen** erlaubt sein.
-
-## OpenRouter
-
-Der API-Key wird lokal über die macOS-Keychain gespeichert, nicht in `settings.json` und nicht im Git-Repo. In der App unter **Einstellungen → KI** eintragen.
-
-Für lokale Tests kann der Key auch direkt in die Keychain geschrieben werden:
-
-```bash
-security add-generic-password -a voize -s de.agentz.voize.openrouter_api_key -w "sk-or-v1-..." -U
-```
-
-## Updates über GitHub Releases
-
-Die App nutzt `tauri-plugin-updater` und lädt `latest.json` aus:
-
-```text
-https://github.com/AgentZ-Media/VoiZe/releases/latest/download/latest.json
-```
-
-Für GitHub Actions ist dieses Secret gesetzt bzw. nötig:
-
-```text
-TAURI_SIGNING_PRIVATE_KEY
-```
-
-Ein Release wird über einen Versionstag ausgelöst:
+Ein Versionstag löst die GitHub Action aus, die Apple-Silicon- und Intel-Builds baut und die Updater-Dateien (`latest.json`) veröffentlicht:
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-Die Action baut Apple-Silicon- und Intel-macOS-Artefakte und veröffentlicht die Updater-Dateien.
+Benötigtes Repo-Secret: `TAURI_SIGNING_PRIVATE_KEY`
+
+### OpenRouter-Key (optional, für KI-Nachbearbeitung)
+
+Wird lokal in der macOS-Keychain gespeichert — nie in `settings.json`, nie im Repo. Eintragen unter **Einstellungen → KI** oder direkt:
+
+```bash
+security add-generic-password -a voize -s de.agentz.voize.openrouter_api_key -w "sk-or-v1-..." -U
+```
+
+</details>

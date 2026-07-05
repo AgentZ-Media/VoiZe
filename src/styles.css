@@ -696,6 +696,11 @@ button:focus-visible {
   animation: setup-progress 1.15s var(--ease) infinite;
 }
 
+.setup-progress.determinate .setup-progress-bar span {
+  transform: none;
+  transition: width 0.25s var(--ease);
+}
+
 .setup-progress.ready .setup-progress-bar span {
   width: 100%;
   background: var(--success);

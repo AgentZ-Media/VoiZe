@@ -14,6 +14,9 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   accessibilityStatus,
+  asrCancelDownload,
+  asrDownload,
+  asrRemoveModel,
   asrStatus,
   deliverText,
   dictionaryDelete,
@@ -21,12 +24,12 @@ import {
   dictionaryUpsert,
   historyDelete,
   historyList,
-  prepareAsrModel,
   requestAccessibility,
   saveSettings,
   getSettings,
 } from "../lib/api";
 import type {
+  AsrDownloadProgress,
   AsrStatus,
   DictionaryEntry,
   HistoryEntry,
@@ -553,13 +556,17 @@ function History() {
   );
 }
 
+function formatBytes(bytes: number) {
+  if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;
+  return `${Math.round(bytes / 1_000_000)} MB`;
+}
+
 function Diagnostics() {
   const [asr, setAsr] = useState<AsrStatus | null>(null);
   const [access, setAccess] = useState<boolean | null>(null);
-  const [prepare, setPrepare] = useState<{
-    state: "idle" | "running" | "ready" | "error";
-    message: string;
-  }>({ state: "idle", message: "" });
+  const [progress, setProgress] = useState<AsrDownloadProgress | null>(null);
+  const [message, setMessage] = useState("");
+  const [failed, setFailed] = useState(false);
 
   const refresh = () => {
     asrStatus().then(setAsr).catch(() => {});
@@ -568,71 +575,126 @@ function Diagnostics() {
   useEffect(refresh, []);
 
   useEffect(() => {
-    const un = listen<{ state: "running" | "ready" | "error"; message: string }>(
-      "asr-prepare-status",
-      (event) => {
-        setPrepare(event.payload);
-        if (event.payload.state === "ready") refresh();
-      },
-    );
+    const unProgress = listen<AsrDownloadProgress>("asr://progress", (event) => {
+      setFailed(false);
+      setProgress(event.payload);
+    });
+    const unDone = listen("asr://done", async () => {
+      setProgress(null);
+      setFailed(false);
+      setMessage("Lokale Transkription ist bereit.");
+      refresh();
+      const current = await getSettings().catch(() => null);
+      if (current && !current.asr_model_ready) {
+        const next = { ...current, asr_model_ready: true };
+        await saveSettings(next).catch(() => {});
+        await emit("settings-saved", next).catch(() => {});
+      }
+    });
+    const unError = listen<string>("asr://error", (event) => {
+      setProgress(null);
+      setFailed(true);
+      setMessage(event.payload);
+      refresh();
+    });
+    // keep the pane live while a download started elsewhere is running
+    const poll = window.setInterval(refresh, 3000);
     return () => {
-      void un.then((f) => f());
+      void unProgress.then((f) => f());
+      void unDone.then((f) => f());
+      void unError.then((f) => f());
+      window.clearInterval(poll);
     };
   }, []);
 
-  async function prepareModel() {
-    setPrepare({
-      state: "running",
-      message: "Parakeet wird vorbereitet. Der erste Start kann einige Minuten dauern.",
+  async function startDownload() {
+    setFailed(false);
+    setMessage("");
+    setProgress({ downloaded: 0, total: asr?.total_bytes ?? 0 });
+    refresh();
+    await asrDownload().catch(() => {
+      // asr://error carries the message
     });
-    try {
-      await prepareAsrModel();
-      const current = await getSettings();
-      const next = { ...current, asr_model_ready: true };
-      await saveSettings(next);
-      await emit("settings-saved", next);
-      setPrepare({ state: "ready", message: "Lokale Transkription ist bereit." });
-      refresh();
-    } catch (e) {
-      setPrepare({ state: "error", message: String(e) });
-    }
+    refresh();
   }
+
+  async function removeModel() {
+    await asrRemoveModel().catch(() => {});
+    setMessage("");
+    setProgress(null);
+    refresh();
+  }
+
+  const downloading = progress !== null || Boolean(asr?.downloading);
+  const percent =
+    progress && progress.total > 0
+      ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
+      : 0;
+  const stateClass = failed
+    ? "error"
+    : asr?.installed
+      ? "ready"
+      : downloading
+        ? "determinate"
+        : "idle";
 
   return (
     <div className="pane-stack">
       <section className="group">
         <h2>Lokale Transkription</h2>
         <dl className="diagnostics">
-          <dt>Python</dt>
-          <dd>{asr?.python ? "gefunden" : "nicht gefunden"}</dd>
-          <dt>Parakeet MLX</dt>
-          <dd>{asr?.parakeet_mlx ? "bereit" : "fehlt"}</dd>
-          <dt>Skript</dt>
-          <dd>{asr?.script || "wird geprüft"}</dd>
-          <dt>Hinweis</dt>
-          <dd>{asr?.hint}</dd>
+          <dt>Engine</dt>
+          <dd>{asr?.engine ?? "wird geprüft"}</dd>
+          <dt>Modell</dt>
+          <dd>
+            {asr?.installed
+              ? "installiert"
+              : downloading
+                ? "wird geladen"
+                : `nicht installiert (${formatBytes(asr?.total_bytes ?? 0)})`}
+          </dd>
+          <dt>Status</dt>
+          <dd>{asr?.loaded ? "im Speicher, sofort bereit" : "wird bei Bedarf geladen"}</dd>
         </dl>
-        <div className={`setup-progress ${prepare.state}`}>
+        <div className={`setup-progress ${stateClass}`}>
           <div className="setup-progress-bar">
-            <span />
+            <span style={downloading ? { width: `${Math.max(2, percent)}%` } : undefined} />
           </div>
-          <p>{prepare.message || "Parakeet wird beim ersten Start automatisch vorbereitet."}</p>
+          <p>
+            {failed
+              ? message
+              : downloading && progress
+                ? `${formatBytes(progress.downloaded)} von ${formatBytes(progress.total)} (${percent} %)`
+                : asr?.installed
+                  ? message || "Alles bereit. Die Transkription läuft vollständig lokal."
+                  : "Das Sprachmodell wird einmalig heruntergeladen (~670 MB). Danach ist keine Internetverbindung mehr nötig."}
+          </p>
         </div>
-        <button
-          type="button"
-          className="soft-btn"
-          onClick={() => void prepareModel()}
-          disabled={prepare.state === "running"}
-        >
-          <Download size={14} />
-          Parakeet-Modell laden
-        </button>
+        <div className="button-row">
+          {!asr?.installed && !downloading && (
+            <button type="button" className="primary-btn" onClick={() => void startDownload()}>
+              <Download size={14} />
+              {failed ? "Erneut versuchen" : "Modell laden"}
+            </button>
+          )}
+          {downloading && (
+            <button type="button" className="soft-btn" onClick={() => void asrCancelDownload()}>
+              Abbrechen
+            </button>
+          )}
+          {asr?.installed && (
+            <button type="button" className="soft-btn" onClick={() => void removeModel()}>
+              <Trash2 size={14} />
+              Modell entfernen
+            </button>
+          )}
+        </div>
       </section>
       <section className="group">
         <h2>macOS Berechtigungen</h2>
         <dl className="diagnostics">
           <dt>Bedienungshilfen</dt>
-          <dd>{access ? "erlaubt" : "nicht erlaubt"}</dd>
+          <dd>{access ? "erlaubt" : "nicht erlaubt — direktes Einfügen fällt auf die Zwischenablage zurück"}</dd>
         </dl>
         <button
           type="button"

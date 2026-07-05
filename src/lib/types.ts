@@ -88,8 +88,14 @@ export interface OpenRouterModel {
 }
 
 export interface AsrStatus {
-  python: boolean;
-  parakeet_mlx: boolean;
-  script: string;
-  hint: string;
+  installed: boolean;
+  downloading: boolean;
+  loaded: boolean;
+  total_bytes: number;
+  engine: string;
+}
+
+export interface AsrDownloadProgress {
+  downloaded: number;
+  total: number;
 }

@@ -311,12 +311,21 @@ pub async fn deliver_text(
     if mode == "clipboard" {
         return Ok("clipboard".into());
     }
+    // Without the accessibility permission Cmd+V is silently ignored by
+    // macOS — the text is already in the clipboard at this point, so report
+    // that as an explicit fallback instead of pretending the paste worked.
+    if !accessibility_trusted() {
+        return Ok("clipboard_fallback".into());
+    }
     tauri::async_runtime::spawn_blocking(move || {
         std::thread::sleep(Duration::from_millis(90));
         send_cmd_v();
         if restore_clipboard {
             if let Some(old) = previous {
-                std::thread::sleep(Duration::from_secs(30));
+                // long enough for the frontmost app to service the paste
+                // event, short enough that a manual copy right after
+                // dictating isn't clobbered
+                std::thread::sleep(Duration::from_millis(1200));
                 let _ = app.clipboard().write_text(old);
             }
         }

@@ -1,9 +1,76 @@
-import { encodeWav } from "./wav";
-
 export interface Recording {
-  blob: Blob;
+  /// 16 kHz mono 16-bit little-endian PCM, base64 (no WAV header)
+  pcmB64: string;
   durationMs: number;
-  sampleRate: number;
+}
+
+// Runs inside the AudioWorklet realm; posts each 128-frame block to the
+// main thread. Kept as source text so it can be loaded from a Blob URL
+// without a separate bundler entry.
+const WORKLET_SOURCE = `
+class CaptureProcessor extends AudioWorkletProcessor {
+  process(inputs) {
+    const channel = inputs[0] && inputs[0][0];
+    if (channel && channel.length) {
+      const copy = new Float32Array(channel.length);
+      copy.set(channel);
+      this.port.postMessage(copy, [copy.buffer]);
+    }
+    return true;
+  }
+}
+registerProcessor("voize-capture", CaptureProcessor);
+`;
+
+let workletUrl: string | null = null;
+
+function getWorkletUrl(): string {
+  if (!workletUrl) {
+    workletUrl = URL.createObjectURL(
+      new Blob([WORKLET_SOURCE], { type: "application/javascript" }),
+    );
+  }
+  return workletUrl;
+}
+
+/// Resample captured Float32 audio to 16 kHz mono and encode as base64
+/// 16-bit PCM. OfflineAudioContext does the band-limited resampling.
+async function toPcm16kBase64(
+  chunks: Float32Array[],
+  sourceRate: number,
+): Promise<string> {
+  const RATE = 16000;
+  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  if (total === 0) return "";
+  const merged = new Float32Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  let mono = merged;
+  if (sourceRate !== RATE) {
+    const frames = Math.max(1, Math.ceil((total / sourceRate) * RATE));
+    const off = new OfflineAudioContext(1, frames, RATE);
+    const buffer = off.createBuffer(1, total, sourceRate);
+    buffer.copyToChannel(merged, 0);
+    const src = off.createBufferSource();
+    src.buffer = buffer;
+    src.connect(off.destination);
+    src.start();
+    mono = (await off.startRendering()).getChannelData(0);
+  }
+  const pcm = new Int16Array(mono.length);
+  for (let i = 0; i < mono.length; i += 1) {
+    const v = Math.max(-1, Math.min(1, mono[i]));
+    pcm[i] = Math.round(v < 0 ? v * 32768 : v * 32767);
+  }
+  const bytes = new Uint8Array(pcm.buffer);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(bin);
 }
 
 export class VoiceRecorder {
@@ -11,6 +78,7 @@ export class VoiceRecorder {
   private stream: MediaStream | null = null;
   private source: MediaStreamAudioSourceNode | null = null;
   private analyser: AnalyserNode | null = null;
+  private worklet: AudioWorkletNode | null = null;
   private processor: ScriptProcessorNode | null = null;
   private sink: GainNode | null = null;
   private levelFrame = 0;
@@ -26,28 +94,53 @@ export class VoiceRecorder {
     if (this.ctx) return;
     this.chunks = [];
     this.startedAt = performance.now();
+    // Echo cancellation / noise suppression / AGC stay off: WKWebView's
+    // audio processing chain ramps up for ~0.6-1 s after the track opens
+    // and delivers pure silence first — push-to-talk would swallow the
+    // first word. The raw signal transcribes fine.
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
       },
     });
-    const ctx = new AudioContext({ sampleRate: 16000 });
+    const ctx = new AudioContext();
     await ctx.resume();
     const source = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
     analyser.smoothingTimeConstant = 0.62;
-    const processor = ctx.createScriptProcessor(1024, 1, 1);
     const sink = ctx.createGain();
     sink.gain.value = 0;
-    processor.onaudioprocess = (event) => {
-      const data = event.inputBuffer.getChannelData(0);
-      const copy = new Float32Array(data.length);
-      copy.set(data);
-      this.chunks.push(copy);
-    };
+
+    try {
+      await ctx.audioWorklet.addModule(getWorkletUrl());
+      const worklet = new AudioWorkletNode(ctx, "voize-capture", {
+        numberOfInputs: 1,
+        numberOfOutputs: 1,
+        channelCount: 1,
+      });
+      worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
+        this.chunks.push(event.data);
+      };
+      source.connect(worklet);
+      worklet.connect(sink);
+      this.worklet = worklet;
+    } catch {
+      // deprecated but universally supported fallback
+      const processor = ctx.createScriptProcessor(1024, 1, 1);
+      processor.onaudioprocess = (event) => {
+        const data = event.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(data.length);
+        copy.set(data);
+        this.chunks.push(copy);
+      };
+      source.connect(processor);
+      processor.connect(sink);
+      this.processor = processor;
+    }
+
     const levelBuffer = new Uint8Array(analyser.fftSize);
     const updateLevel = () => {
       if (!this.analyser) return;
@@ -57,20 +150,18 @@ export class VoiceRecorder {
         const sample = (levelBuffer[i] - 128) / 128;
         sum += sample * sample;
       }
-      const target = Math.min(1, Math.sqrt(sum / levelBuffer.length) * 5.8);
+      // raw capture (no AGC) is quieter — scale up for the waveform
+      const target = Math.min(1, Math.sqrt(sum / levelBuffer.length) * 9.5);
       this.smoothedLevel = this.smoothedLevel * 0.7 + target * 0.3;
       onLevel(this.smoothedLevel);
       this.levelFrame = window.requestAnimationFrame(updateLevel);
     };
-    source.connect(processor);
     source.connect(analyser);
-    processor.connect(sink);
     sink.connect(ctx.destination);
     this.ctx = ctx;
     this.stream = stream;
     this.source = source;
     this.analyser = analyser;
-    this.processor = processor;
     this.sink = sink;
     this.smoothedLevel = 0;
     this.levelFrame = window.requestAnimationFrame(updateLevel);
@@ -84,11 +175,15 @@ export class VoiceRecorder {
     const durationMs = Math.max(0, performance.now() - this.startedAt);
     if (this.levelFrame) window.cancelAnimationFrame(this.levelFrame);
     this.levelFrame = 0;
+    if (this.worklet) this.worklet.port.onmessage = null;
     this.analyser?.disconnect();
+    this.worklet?.disconnect();
     this.processor?.disconnect();
     this.source?.disconnect();
     this.sink?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
+    const sampleRate = ctx.sampleRate;
+    this.worklet = null;
     this.processor = null;
     this.analyser = null;
     this.source = null;
@@ -96,9 +191,9 @@ export class VoiceRecorder {
     this.stream = null;
     this.ctx = null;
     await ctx.close().catch(() => {});
-    const blob = encodeWav(this.chunks, ctx.sampleRate);
-    const sampleRate = ctx.sampleRate;
+    const chunks = this.chunks;
     this.chunks = [];
-    return { blob, durationMs, sampleRate };
+    const pcmB64 = await toPcm16kBase64(chunks, sampleRate);
+    return { pcmB64, durationMs };
   }
 }

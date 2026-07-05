@@ -29,11 +29,14 @@ export const requestAccessibility = () =>
 export const screenContext = () => invoke<ScreenContext>("screen_context");
 
 export const asrStatus = () => invoke<AsrStatus>("asr_status");
-export const prepareAsrModel = () => invoke<void>("prepare_asr_model");
-export const transcribeAudio = (wavB64: string) =>
+export const asrDownload = () => invoke<void>("asr_download");
+export const asrCancelDownload = () => invoke<void>("asr_cancel_download");
+export const asrRemoveModel = () => invoke<void>("asr_remove_model");
+export const asrPreload = () => invoke<void>("asr_preload");
+export const transcribeAudio = (pcmB64: string) =>
   invoke<{ text: string; engine: string; duration_ms: number | null }>(
     "transcribe_audio",
-    { wavB64 },
+    { pcmB64 },
   );
 
 export const deliverText = (

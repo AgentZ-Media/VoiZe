@@ -1,11 +1,13 @@
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { register, unregisterAll } from "@tauri-apps/plugin-global-shortcut";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   activationStart,
+  asrDownload,
+  asrPreload,
   asrStatus,
   deliverText,
   dictionaryList,
@@ -16,7 +18,6 @@ import {
   openrouterChat,
   playStatusSound,
   positionHud,
-  prepareAsrModel,
   saveSettings,
   screenContext,
   showSettings,
@@ -24,7 +25,6 @@ import {
 } from "./lib/api";
 import { VoiceRecorder } from "./lib/recorder";
 import type { DictionaryEntry, ScreenContext, Settings } from "./lib/types";
-import { blobToBase64 } from "./lib/wav";
 
 type HudState =
   | "idle"
@@ -35,7 +35,14 @@ type HudState =
   | "copied"
   | "error";
 
+/// Explicit dictation lifecycle. All transitions happen in one place per
+/// phase; "starting"/"recording" overlap with async work is resolved via
+/// `pending`, never by racing booleans.
+type Phase = "idle" | "starting" | "recording" | "processing";
+type PendingAction = "none" | "stop" | "cancel";
+
 const currentWindow = getCurrentWindow();
+const MIN_RECORD_MS = 250;
 
 function toAccelerator(hotkey: string) {
   if (/fn/i.test(hotkey)) return null;
@@ -59,7 +66,12 @@ function applyDictionary(text: string, dictionary: DictionaryEntry[]) {
   for (const entry of dictionary) {
     if (!entry.replacement?.trim()) continue;
     const escaped = entry.term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    out = out.replace(new RegExp(`\\b${escaped}\\b`, "gi"), entry.replacement);
+    // \b is ASCII-only — use Unicode-aware boundaries so terms with
+    // umlauts (Häkchen, Öl, ...) match as whole words too
+    out = out.replace(
+      new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, "giu"),
+      entry.replacement,
+    );
   }
   return out;
 }
@@ -110,19 +122,22 @@ export default function App() {
   const [error, setError] = useState("");
   const settingsRef = useRef<Settings | null>(null);
   const recorder = useRef(new VoiceRecorder());
-  const contextRef = useRef<ScreenContext | null>(null);
   const contextPromiseRef = useRef<Promise<ScreenContext | null> | null>(null);
-  const starting = useRef(false);
-  const stopping = useRef(false);
-  const stopAfterStart = useRef(false);
+  const phase = useRef<Phase>("idle");
+  const pending = useRef<PendingAction>("none");
+  const modelReady = useRef(false);
+  const runtimeStarted = useRef(false);
 
   useEffect(() => {
     settingsRef.current = settings;
   }, [settings]);
 
   const toggleRecording = useCallback(() => {
-    if (recorder.current.running || starting.current) void stopRecording();
-    else void startRecording();
+    if (phase.current === "recording" || phase.current === "starting") {
+      void stopRecording();
+    } else if (phase.current === "idle") {
+      void startRecording();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -150,7 +165,7 @@ export default function App() {
 
   const hideSoon = useCallback((delay = 1400) => {
     window.setTimeout(() => {
-      if (!recorder.current.running) void currentWindow.hide();
+      if (phase.current === "idle") void currentWindow.hide();
     }, delay);
   }, []);
 
@@ -196,7 +211,7 @@ export default function App() {
       const parsed = JSON.parse(raw) as { term?: string; notes?: string }[];
       for (const item of parsed.slice(0, 12)) {
         if (!item.term?.trim()) continue;
-      await dictionaryUpsert({
+        await dictionaryUpsert({
           term: item.term.trim(),
           notes: item.notes ?? "Automatically learned from recent dictations.",
           replacement: null,
@@ -214,6 +229,7 @@ export default function App() {
   }, []);
 
   const startRuntime = useCallback((s: Settings) => {
+    runtimeStarted.current = true;
     void activationStart(s.hotkey, s.hands_free_hotkey);
     void registerFallbacks(s);
     void runLearning(s);
@@ -224,41 +240,54 @@ export default function App() {
     }
   }, [registerFallbacks, runLearning]);
 
+  /// Model install gate: hotkeys only go live once the local model is on
+  /// disk. If it's missing, the settings window opens on the diagnostics
+  /// pane and the download starts automatically (with resume); the pane
+  /// itself renders progress from the asr:// events.
   const ensureAsrReady = useCallback(async (s: Settings) => {
     const status = await asrStatus().catch(() => null);
-    if (s.asr_model_ready && status?.parakeet_mlx) {
-      startRuntime(s);
+    if (status?.installed) {
+      modelReady.current = true;
+      if (!s.asr_model_ready) {
+        const next = { ...s, asr_model_ready: true };
+        settingsRef.current = next;
+        setSettings(next);
+        await saveSettings(next).catch(() => {});
+      }
+      startRuntime(settingsRef.current ?? s);
+      void asrPreload().catch(() => {});
       return;
     }
-
     await showSettings("diagnostics").catch(() => {});
-    await new Promise((resolve) => window.setTimeout(resolve, 250));
-    await emit("asr-prepare-status", {
-      state: "running",
-      message: "Parakeet wird vorbereitet. Der erste Start kann einige Minuten dauern.",
-    }).catch(() => {});
-
     try {
-      await prepareAsrModel();
-      const next = { ...s, asr_model_ready: true };
+      if (!status?.downloading) {
+        await asrDownload();
+      } else {
+        await new Promise<void>((resolve, reject) => {
+          const done = listen("asr://done", () => {
+            void done.then((f) => f());
+            void fail.then((f) => f());
+            resolve();
+          });
+          const fail = listen<string>("asr://error", (event) => {
+            void done.then((f) => f());
+            void fail.then((f) => f());
+            reject(new Error(event.payload));
+          });
+        });
+      }
+      modelReady.current = true;
+      const current = settingsRef.current ?? s;
+      const next = { ...current, asr_model_ready: true };
       settingsRef.current = next;
       setSettings(next);
-      await saveSettings(next);
-      await emit("asr-prepare-status", {
-        state: "ready",
-        message: "Lokale Transkription ist bereit.",
-      }).catch(() => {});
+      await saveSettings(next).catch(() => {});
       startRuntime(next);
+      void asrPreload().catch(() => {});
     } catch (e) {
-      const message = String(e);
-      setError(message);
-      setCaption("Transkription nicht bereit");
-      setState("error");
-      await emit("asr-prepare-status", {
-        state: "error",
-        message,
-      }).catch(() => {});
-      void playStatusSound("error");
+      // the diagnostics pane shows the error and offers a retry; hotkeys
+      // stay off until the model is actually there
+      console.warn("model download failed:", e);
     }
   }, [startRuntime]);
 
@@ -277,19 +306,23 @@ export default function App() {
     const unlisten = [
       listen("activation-start", () => void startRecording()),
       listen("activation-stop", () => void stopRecording()),
-      listen("handsfree-toggle", () => {
-        if (recorder.current.running || starting.current) void stopRecording();
-        else void startRecording();
-      }),
+      listen("handsfree-toggle", () => toggleRecording()),
       listen("activation-cancel", () => void cancelRecording()),
-      listen("tray-dictate", () => {
-        if (recorder.current.running || starting.current) void stopRecording();
-        else void startRecording();
+      listen("tray-dictate", () => toggleRecording()),
+      listen("asr://done", () => {
+        // download finished via the settings pane — arm the runtime if the
+        // startup path didn't already
+        modelReady.current = true;
+        const s = settingsRef.current;
+        if (s && !runtimeStarted.current) {
+          startRuntime(s);
+          void asrPreload().catch(() => {});
+        }
       }),
       listen<Settings>("settings-saved", (event) => {
         settingsRef.current = event.payload;
         setSettings(event.payload);
-        if (event.payload.asr_model_ready) startRuntime(event.payload);
+        if (modelReady.current) startRuntime(event.payload);
       }),
     ];
     return () => {
@@ -301,13 +334,12 @@ export default function App() {
 
   async function startRecording() {
     const activeSettings = settingsRef.current;
-    if (!activeSettings || recorder.current.running || starting.current || stopping.current) return;
-    starting.current = true;
-    stopAfterStart.current = false;
+    if (!activeSettings || !modelReady.current || phase.current !== "idle") return;
+    phase.current = "starting";
+    pending.current = "none";
     setError("");
     setCaption("Hört zu");
     setState("recording");
-    contextRef.current = null;
     contextPromiseRef.current = activeSettings.context_enabled
       ? screenContext().catch(() => null)
       : Promise.resolve(null);
@@ -316,14 +348,15 @@ export default function App() {
       await currentWindow.show().catch(() => {});
       if (activeSettings.start_sound_enabled) void playStatusSound("start");
       await recorder.current.start(setLevel);
-      starting.current = false;
-      if (stopAfterStart.current) {
-        stopAfterStart.current = false;
-        void stopRecording();
-      }
+      phase.current = "recording";
+      // the release/cancel may have arrived while getUserMedia was opening
+      const queued = pending.current as PendingAction;
+      pending.current = "none";
+      if (queued === "stop") void stopRecording();
+      else if (queued === "cancel") void cancelRecording();
     } catch (e) {
-      starting.current = false;
-      stopAfterStart.current = false;
+      phase.current = "idle";
+      pending.current = "none";
       setError(String(e));
       setCaption("Mikrofon nicht verfügbar");
       setState("error");
@@ -334,30 +367,27 @@ export default function App() {
 
   async function stopRecording() {
     const activeSettings = settingsRef.current;
-    if (!activeSettings || stopping.current) return;
-    if (starting.current) {
-      stopAfterStart.current = true;
+    if (!activeSettings) return;
+    if (phase.current === "starting") {
+      pending.current = "stop";
       return;
     }
-    if (!recorder.current.running) return;
-    stopping.current = true;
+    if (phase.current !== "recording") return;
+    phase.current = "processing";
     setLevel(0);
     setCaption("Transkribiert lokal");
     setState("transcribing");
     if (activeSettings.finish_sound_enabled) void playStatusSound("stop");
     try {
       const recording = await recorder.current.stop();
-      const activeContext =
-        (await contextPromiseRef.current?.catch(() => null)) ?? contextRef.current;
-      contextRef.current = activeContext;
-      if (recording.durationMs < 250) {
+      const activeContext = (await contextPromiseRef.current?.catch(() => null)) ?? null;
+      if (recording.durationMs < MIN_RECORD_MS || !recording.pcmB64) {
         setCaption("Zu kurz");
         setState("idle");
         hideSoon(600);
         return;
       }
-      const wavB64 = await blobToBase64(recording.blob);
-      const asr = await transcribeAudio(wavB64);
+      const asr = await transcribeAudio(recording.pcmB64);
       const dictionary = await dictionaryList().catch(() => []);
       let finalText = applyDictionary(asr.text, dictionary);
       let postProcessed = false;
@@ -365,17 +395,25 @@ export default function App() {
       if (activeSettings.postprocess_enabled && activeSettings.openrouter_api_key.trim()) {
         setCaption("Formatiert mit KI");
         setState("polishing");
-        finalText = await openrouterChat(
-          activeSettings.postprocess_model,
-          buildPolishMessages(finalText, activeContext, dictionary, activeSettings),
-          0.15,
-        );
-        postProcessed = true;
+        try {
+          finalText = await openrouterChat(
+            activeSettings.postprocess_model,
+            buildPolishMessages(finalText, activeContext, dictionary, activeSettings),
+            0.15,
+          );
+          postProcessed = true;
+        } catch {
+          // network/API failure must never cost the dictation — deliver
+          // the raw local transcript instead
+        }
       }
 
       finalText = finalText.trim();
       if (!finalText) {
-        throw new Error("Leere Transkription.");
+        setCaption("Nichts erkannt");
+        setState("idle");
+        hideSoon(900);
+        return;
       }
       setCaption(activeSettings.output_mode === "clipboard" ? "Kopiert" : "Fügt ein");
       const delivery = await deliverText(
@@ -383,12 +421,12 @@ export default function App() {
         activeSettings.output_mode,
         activeSettings.restore_clipboard,
       );
-      setState(delivery === "clipboard" ? "copied" : "inserted");
+      setState(delivery === "insert" ? "inserted" : "copied");
       if (activeSettings.finish_sound_enabled) void playStatusSound("success");
       await historyInsert({
-        focused_app: contextRef.current?.app_name ?? null,
-        bundle_id: contextRef.current?.bundle_id ?? null,
-        window_title: contextRef.current?.window_title ?? null,
+        focused_app: activeContext?.app_name ?? null,
+        bundle_id: activeContext?.bundle_id ?? null,
+        window_title: activeContext?.window_title ?? null,
         raw_text: asr.text,
         final_text: finalText,
         delivery_mode: delivery,
@@ -397,35 +435,41 @@ export default function App() {
         duration_ms: recording.durationMs,
         dictionary_snapshot: JSON.stringify(dictionary),
       }).catch(() => {});
-      setCaption(delivery === "clipboard" ? "In der Zwischenablage" : "Eingefügt");
-      hideSoon();
+      setCaption(
+        delivery === "insert"
+          ? "Eingefügt"
+          : delivery === "clipboard_fallback"
+            ? "Kopiert – für direktes Einfügen Bedienungshilfen erlauben"
+            : "In der Zwischenablage",
+      );
+      hideSoon(delivery === "clipboard_fallback" ? 3200 : 1400);
     } catch (e) {
       setError(String(e));
       setCaption("Fehler");
       setState("error");
       void playStatusSound("error");
-      if (/asr|parakeet|python|transkription|script/i.test(String(e))) {
+      if (/modell|model|installiert/i.test(String(e))) {
         await showSettings("diagnostics").catch(() => {});
-        await emit("asr-prepare-status", {
-          state: "error",
-          message: String(e),
-        }).catch(() => {});
       }
       hideSoon(4200);
     } finally {
       contextPromiseRef.current = null;
-      stopping.current = false;
+      phase.current = "idle";
+      pending.current = "none";
     }
   }
 
   async function cancelRecording() {
-    if (starting.current) {
-      stopAfterStart.current = true;
+    if (phase.current === "starting") {
+      pending.current = "cancel";
       return;
     }
-    if (!recorder.current.running) return;
+    if (phase.current !== "recording") return;
+    phase.current = "processing";
     await recorder.current.stop().catch(() => null);
     contextPromiseRef.current = null;
+    phase.current = "idle";
+    pending.current = "none";
     setLevel(0);
     setCaption("Abgebrochen");
     setState("idle");
@@ -433,12 +477,12 @@ export default function App() {
   }
 
   const bars = Array.from({ length: 16 }, (_, i) => {
-    const phase = Math.sin(i * 0.72 + visualTick / 110);
+    const phaseValue = Math.sin(i * 0.72 + visualTick / 110);
     const value =
       state === "recording"
-        ? Math.max(0.12, level * (0.72 + phase * 0.24))
+        ? Math.max(0.12, level * (0.72 + phaseValue * 0.24))
         : state === "transcribing" || state === "polishing"
-          ? 0.36 + Math.max(0, phase) * 0.38
+          ? 0.36 + Math.max(0, phaseValue) * 0.38
           : 0.14;
     return <span key={i} style={{ height: `${Math.round(6 + value * 24)}px` }} />;
   });
