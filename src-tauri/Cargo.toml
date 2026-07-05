@@ -1,0 +1,34 @@
+[package]
+name = "voize"
+version = "0.1.0"
+description = "VoiZe - local-first macOS dictation"
+authors = ["AgentZ Media"]
+edition = "2021"
+
+[lib]
+name = "voize_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+base64 = "0.22"
+block2 = "0.6"
+chrono = "0.4"
+libc = "0.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSEvent", "NSWorkspace", "NSRunningApplication", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-clipboard-manager = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"
+window-vibrancy = "0.6"
