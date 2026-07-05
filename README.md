@@ -11,7 +11,7 @@ Taste halten, sprechen, loslassen. Dein Text erscheint direkt dort, wo dein Curs
 
 [![Download](https://img.shields.io/github/v/release/AgentZ-Media/VoiZe?label=Download&color=6e56cf&style=for-the-badge)](https://github.com/AgentZ-Media/VoiZe/releases/latest)
 &nbsp;
-![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon%20%26%20Intel-111?style=for-the-badge&logo=apple)
+![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111?style=for-the-badge&logo=apple)
 &nbsp;
 ![Privat](https://img.shields.io/badge/Transkription-100%25%20lokal-2da44e?style=for-the-badge)
 
@@ -109,7 +109,7 @@ Artefakte: `src-tauri/target/release/bundle/macos/VoiZe.app` und `.../dmg/VoiZe_
 
 ### Release veröffentlichen
 
-Ein Versionstag löst die GitHub Action aus, die Apple-Silicon- und Intel-Builds baut und die Updater-Dateien (`latest.json`) veröffentlicht:
+Ein Versionstag löst die GitHub Action aus, die den Apple-Silicon-Build baut und die Updater-Dateien (`latest.json`) veröffentlicht:
 
 ```bash
 git tag v0.1.0
