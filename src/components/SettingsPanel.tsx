@@ -2,16 +2,9 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import {
-  Check,
-  Copy,
-  Download,
-  Keyboard,
-  Plus,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Keyboard, Plus, Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   accessibilityStatus,
   asrCancelDownload,
@@ -51,29 +44,57 @@ interface Props {
   onSettings: (settings: Settings) => void;
 }
 
-function Toggle({
-  checked,
-  onChange,
+function Group({ title, children }: { title?: string; children: ReactNode }) {
+  return (
+    <section>
+      {title && <h3 className="group-title">{title}</h3>}
+      <div className="group-box">{children}</div>
+    </section>
+  );
+}
+
+function Row({
   label,
   hint,
+  wide,
+  children,
 }: {
-  checked: boolean;
-  onChange: (checked: boolean) => void;
   label: string;
   hint?: string;
+  wide?: boolean;
+  children?: ReactNode;
 }) {
   return (
-    <label className="toggle-row">
-      <span>
-        <strong>{label}</strong>
-        {hint && <small>{hint}</small>}
-      </span>
+    <div className={wide ? "row wide" : "row"}>
+      <div className="row-text">
+        <span className="row-label">{label}</span>
+        {hint && <span className="row-hint">{hint}</span>}
+      </div>
+      {children && <div className="row-ctl">{children}</div>}
+    </div>
+  );
+}
+
+function SwitchRow({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <Row label={label} hint={hint}>
       <input
         type="checkbox"
+        className="switch"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
-    </label>
+    </Row>
   );
 }
 
@@ -90,7 +111,7 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
     };
   }, []);
 
-  if (!form) return <div className="settings-scroll" />;
+  if (!form) return <div className="settings-pane" />;
 
   const set = (patch: Partial<Settings>) => {
     const next = { ...form, ...patch };
@@ -101,22 +122,19 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
       onSettings(next);
       setSaved(true);
       void emit("settings-saved", next);
-      window.setTimeout(() => setSaved(false), 1200);
+      window.setTimeout(() => setSaved(false), 1600);
     }, 450);
   };
 
   return (
-    <div className="settings-scroll">
+    <div className="settings-pane">
       {section === "general" && <General form={form} set={set} />}
       {section === "shortcuts" && <Shortcuts form={form} set={set} />}
       {section === "ai" && <AI form={form} set={set} />}
       {section === "dictionary" && <Dictionary />}
       {section === "history" && <History />}
       {section === "diagnostics" && <Diagnostics />}
-      <div className={`autosave ${saved ? "visible" : ""}`}>
-        <Check size={13} />
-        Gespeichert
-      </div>
+      <div className={`autosave ${saved ? "visible" : ""}`}>Gespeichert</div>
     </div>
   );
 }
@@ -148,13 +166,13 @@ function General({
   }
 
   async function checkUpdate() {
-    setUpdateStatus("Prüfe Updates...");
+    setUpdateStatus("Prüfe Updates…");
     const found = await check().catch(() => null);
     setUpdate(found);
     setUpdateStatus(
       found
         ? `Version ${found.version} ist verfügbar.`
-        : "Keine Aktualisierung gefunden oder im Dev-Modus nicht verfügbar.",
+        : "VoiZe ist auf dem neuesten Stand.",
     );
   }
 
@@ -171,78 +189,72 @@ function General({
   }
 
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <h2>Ausgabe</h2>
-        <div className="segmented">
-          <button
-            type="button"
-            className={form.output_mode === "insert" ? "active" : ""}
-            onClick={() => set({ output_mode: "insert" })}
+    <>
+      <Group title="Ausgabe">
+        <Row
+          label="Fertiger Text"
+          hint="Direkt einfügen tippt den Text an der Cursorposition ein."
+        >
+          <select
+            value={form.output_mode}
+            onChange={(e) =>
+              set({ output_mode: e.target.value as Settings["output_mode"] })
+            }
           >
-            Direkt einfügen
-          </button>
-          <button
-            type="button"
-            className={form.output_mode === "clipboard" ? "active" : ""}
-            onClick={() => set({ output_mode: "clipboard" })}
-          >
-            Zwischenablage
-          </button>
-        </div>
-        <Toggle
+            <option value="insert">Direkt einfügen</option>
+            <option value="clipboard">Zwischenablage</option>
+          </select>
+        </Row>
+        <SwitchRow
+          label="Zwischenablage wiederherstellen"
+          hint="Nach dem Einfügen wird der vorherige Inhalt zurückgelegt."
           checked={form.restore_clipboard}
           onChange={(restore_clipboard) => set({ restore_clipboard })}
-          label="Vorherige Zwischenablage wiederherstellen"
-          hint="Nach erfolgreichem Einfügen wird der alte Clipboard-Inhalt zurückgelegt."
         />
-      </section>
+      </Group>
 
-      <section className="group">
-        <h2>Verhalten</h2>
-        <Toggle
+      <Group title="Verhalten">
+        <SwitchRow
+          label="Aktivierungssound"
           checked={form.start_sound_enabled}
           onChange={(start_sound_enabled) => set({ start_sound_enabled })}
-          label="Aktivierungssound"
         />
-        <Toggle
+        <SwitchRow
+          label="Abschlusssound"
           checked={form.finish_sound_enabled}
           onChange={(finish_sound_enabled) => set({ finish_sound_enabled })}
-          label="Abschlusssound"
         />
-        <Toggle
+        <SwitchRow
+          label="Beim Start nach Updates suchen"
           checked={form.auto_update_on_launch}
           onChange={(auto_update_on_launch) => set({ auto_update_on_launch })}
-          label="Beim Start automatisch nach Updates suchen"
         />
-        <Toggle
+        <SwitchRow
+          label="Bei Anmeldung öffnen"
+          hint={autostart === null ? "Im Entwicklungsmodus eventuell nicht verfügbar." : undefined}
           checked={Boolean(autostart)}
           onChange={(v) => void toggleAutostart(v)}
-          label="Bei Systemstart öffnen"
-          hint={autostart === null ? "Im Entwicklungsmodus eventuell nicht verfügbar." : undefined}
         />
-      </section>
+      </Group>
 
-      <section className="group">
-        <h2>Updates</h2>
-        <div className="button-row">
-          <button type="button" className="soft-btn" onClick={() => void checkUpdate()}>
-            <RefreshCw size={14} />
-            Nach Updates suchen
-          </button>
-          <button
-            type="button"
-            className="primary-btn"
-            onClick={() => void installUpdate()}
-            disabled={!update || installing}
-          >
-            <Download size={14} />
-            Installieren
-          </button>
-        </div>
-        {updateStatus && <p className="hint-line">{updateStatus}</p>}
-      </section>
-    </div>
+      <Group title="Updates">
+        <Row label="Softwareupdate" hint={updateStatus || "Sucht nach neuen Versionen auf GitHub."}>
+          <div className="btn-row">
+            <button type="button" className="push" onClick={() => void checkUpdate()}>
+              Prüfen
+            </button>
+            <button
+              type="button"
+              className="push primary"
+              onClick={() => void installUpdate()}
+              disabled={!update || installing}
+            >
+              Installieren
+            </button>
+          </div>
+        </Row>
+      </Group>
+    </>
   );
 }
 
@@ -254,30 +266,34 @@ function Shortcuts({
   set: (patch: Partial<Settings>) => void;
 }) {
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <h2>Zum Diktieren halten</h2>
-        <HotkeyCapture
-          value={form.hotkey}
-          onChange={(hotkey) => set({ hotkey })}
-          presets={["Fn", "Ctrl+Opt", "Opt+Cmd"]}
-        />
-        <p className="hint-line">
-          Wispr Flow nutzt auf Macs standardmäßig Fn. Für externe Tastaturen ist Ctrl+Opt die robuste Ausweichoption.
-        </p>
-      </section>
-      <section className="group">
-        <h2>Einmal drücken</h2>
-        <HotkeyCapture
-          value={form.hands_free_hotkey}
-          onChange={(hands_free_hotkey) => set({ hands_free_hotkey })}
-          presets={["Fn+Space", "Ctrl+Opt+Space", "Opt+Space"]}
-        />
-        <p className="hint-line">
-          Standard ist Fn+Space. Ctrl+Opt+Space wird zusätzlich als robuste Ausweichoption registriert.
-        </p>
-      </section>
-    </div>
+    <>
+      <Group title="Zum Diktieren halten">
+        <Row
+          wide
+          label="Push-to-talk"
+          hint="Taste gedrückt halten, sprechen, loslassen. Fn ist der Standard; Ctrl+Opt ist die robuste Option für externe Tastaturen."
+        >
+          <HotkeyCapture
+            value={form.hotkey}
+            onChange={(hotkey) => set({ hotkey })}
+            presets={["Fn", "Ctrl+Opt", "Opt+Cmd"]}
+          />
+        </Row>
+      </Group>
+      <Group title="Einmal drücken">
+        <Row
+          wide
+          label="Freihand-Modus"
+          hint="Einmal drücken zum Starten, erneut drücken zum Stoppen. Ctrl+Opt+Space ist zusätzlich immer aktiv."
+        >
+          <HotkeyCapture
+            value={form.hands_free_hotkey}
+            onChange={(hands_free_hotkey) => set({ hands_free_hotkey })}
+            presets={["Fn+Space", "Ctrl+Opt+Space", "Opt+Space"]}
+          />
+        </Row>
+      </Group>
+    </>
   );
 }
 
@@ -332,12 +348,12 @@ function HotkeyCapture({
           setCapturing(false);
         }}
       >
-        <Keyboard size={15} />
-        <span>{capturing ? "Tasten drücken..." : value}</span>
+        <Keyboard size={14} />
+        <span>{capturing ? "Tasten drücken…" : value}</span>
       </button>
       <div className="preset-row">
         {presets.map((preset) => (
-          <button type="button" key={preset} onClick={() => onChange(preset)}>
+          <button type="button" className="push" key={preset} onClick={() => onChange(preset)}>
             {preset}
           </button>
         ))}
@@ -354,62 +370,59 @@ function AI({
   set: (patch: Partial<Settings>) => void;
 }) {
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <h2>OpenRouter</h2>
-        <label className="field">
-          <span>API-Schlüssel</span>
+    <>
+      <Group title="OpenRouter">
+        <Row label="API-Schlüssel" hint="Wird sicher in der macOS-Keychain gespeichert.">
           <input
             type="password"
             value={form.openrouter_api_key}
             onChange={(e) => set({ openrouter_api_key: e.target.value })}
-            placeholder="sk-or-v1-..."
+            placeholder="sk-or-v1-…"
           />
-        </label>
-        <Toggle
+        </Row>
+        <SwitchRow
+          label="Nachbearbeitung"
+          hint="Formatiert Sätze, Listen und häufige Erkennungsfehler mit KI."
           checked={form.postprocess_enabled}
           onChange={(postprocess_enabled) => set({ postprocess_enabled })}
-          label="Nachbearbeitung aktivieren"
-          hint="Formatiert Sätze, Listen, Abschnitte und häufige ASR-Fehler."
         />
-        <Toggle
+        <SwitchRow
+          label="App-Kontext nutzen"
+          hint="Die fokussierte App fließt als Kontext in die Formatierung ein."
           checked={form.context_enabled}
           onChange={(context_enabled) => set({ context_enabled })}
-          label="Fokussierte App als Kontext nutzen"
         />
-        <Toggle
+        <SwitchRow
+          label="Intelligente Formatierung"
+          hint="Absätze, Aufzählungen und Struktur, wenn das Gesprochene es nahelegt."
           checked={form.smart_formatting}
           onChange={(smart_formatting) => set({ smart_formatting })}
-          label="Intelligente Formatierung"
         />
-      </section>
-      <section className="group">
-        <h2>Modelle</h2>
-        <label className="field">
-          <span>Nachbearbeitung</span>
+      </Group>
+
+      <Group title="Modelle">
+        <Row wide label="Nachbearbeitung">
           <ModelSelect
             value={form.postprocess_model}
             onChange={(postprocess_model) => set({ postprocess_model })}
           />
-        </label>
-        <label className="field">
-          <span>Lernen</span>
+        </Row>
+        <Row wide label="Lernen">
           <ModelSelect
             value={form.learning_model}
             onChange={(learning_model) => set({ learning_model })}
           />
-        </label>
-      </section>
-      <section className="group">
-        <h2>Lernendes Wörterbuch</h2>
-        <Toggle
+        </Row>
+      </Group>
+
+      <Group title="Lernendes Wörterbuch">
+        <SwitchRow
+          label="Vorschläge lernen"
+          hint="Analysiert den lokalen Verlauf und ergänzt plausible Eigennamen."
           checked={form.learning_enabled}
           onChange={(learning_enabled) => set({ learning_enabled })}
-          label="Alle paar Stunden Vorschläge lernen"
-          hint="Analysiert lokale Verlaufseinträge und ergänzt plausible Eigennamen."
         />
-        <label className="field inline">
-          <span>Intervall in Stunden</span>
+        <Row label="Intervall in Stunden">
           <input
             type="number"
             min={1}
@@ -417,17 +430,23 @@ function AI({
             value={form.learning_interval_hours}
             onChange={(e) => set({ learning_interval_hours: Number(e.target.value) })}
           />
-        </label>
-      </section>
-      <section className="group">
-        <h2>Eigene Anweisung</h2>
-        <textarea
-          value={form.custom_instructions}
-          onChange={(e) => set({ custom_instructions: e.target.value })}
-          placeholder="Zum Beispiel: Schreibe E-Mails knapp und direkt. Erkenne gesprochene Bulletpoints."
-        />
-      </section>
-    </div>
+        </Row>
+      </Group>
+
+      <Group title="Eigene Anweisung">
+        <Row
+          wide
+          label="Stil und Regeln"
+          hint="Zum Beispiel: Schreibe E-Mails knapp und direkt. Erkenne gesprochene Bulletpoints."
+        >
+          <textarea
+            rows={5}
+            value={form.custom_instructions}
+            onChange={(e) => set({ custom_instructions: e.target.value })}
+          />
+        </Row>
+      </Group>
+    </>
   );
 }
 
@@ -458,44 +477,49 @@ function Dictionary() {
   }
 
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <h2>Neuer Eintrag</h2>
-        <div className="dictionary-editor">
-          <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Begriff" />
-          <input
-            value={replacement}
-            onChange={(e) => setReplacement(e.target.value)}
-            placeholder="Ersetzung optional"
-          />
-          <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notiz" />
-          <button type="button" className="primary-btn square" onClick={() => void add()}>
-            <Plus size={15} />
-          </button>
-        </div>
-      </section>
-      <section className="list group">
-        {entries.map((entry) => (
-          <article key={entry.id} className="list-row">
-            <div>
-              <strong>{entry.term}</strong>
-              <span>
-                {entry.replacement ? `-> ${entry.replacement}` : "Priorisierter Begriff"}
-                {entry.learned ? " · gelernt" : ""}
-              </span>
-            </div>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Eintrag löschen"
-              onClick={() => dictionaryDelete(entry.id).then(refresh)}
-            >
-              <Trash2 size={14} />
+    <>
+      <Group title="Neuer Eintrag">
+        <div className="row wide">
+          <div className="dictionary-editor">
+            <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Begriff" />
+            <input
+              value={replacement}
+              onChange={(e) => setReplacement(e.target.value)}
+              placeholder="Ersetzung (optional)"
+            />
+            <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notiz" />
+            <button type="button" className="push primary square" onClick={() => void add()}>
+              <Plus size={14} />
             </button>
-          </article>
-        ))}
-      </section>
-    </div>
+          </div>
+        </div>
+      </Group>
+      {entries.length > 0 && (
+        <Group title={`${entries.length} Einträge`}>
+          {entries.map((entry) => (
+            <div key={entry.id} className="row">
+              <div className="row-text">
+                <span className="row-label">{entry.term}</span>
+                <span className="row-hint">
+                  {entry.replacement ? `→ ${entry.replacement}` : "Priorisierter Begriff"}
+                  {entry.learned ? " · gelernt" : ""}
+                </span>
+              </div>
+              <div className="row-ctl">
+                <button
+                  type="button"
+                  className="ghost"
+                  aria-label="Eintrag löschen"
+                  onClick={() => dictionaryDelete(entry.id).then(refresh)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </Group>
+      )}
+    </>
   );
 }
 
@@ -510,49 +534,52 @@ function History() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  const grouped = useMemo(() => entries, [entries]);
-
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <label className="field">
-          <span>Suchen</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} />
-        </label>
-      </section>
-      <section className="list group history-list">
-        {grouped.map((entry) => (
-          <article key={entry.id} className="history-row">
-            <header>
-              <strong>{new Date(entry.created_at).toLocaleString()}</strong>
-              <span>{entry.focused_app || "Unbekannte App"}</span>
-            </header>
-            <p>{entry.final_text}</p>
-            <footer>
-              <span>{entry.post_processed ? "KI formatiert" : "Lokal"}</span>
-              <div className="button-row compact">
-                <button
-                  type="button"
-                  className="soft-btn"
-                  onClick={() => void deliverText(entry.final_text, "clipboard", false)}
-                >
-                  <Copy size={13} />
-                  Kopieren
-                </button>
-                <button
-                  type="button"
-                  className="icon-btn"
-                  aria-label="Eintrag löschen"
-                  onClick={() => historyDelete(entry.id).then(refresh)}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-            </footer>
-          </article>
-        ))}
-      </section>
-    </div>
+    <>
+      <Group>
+        <div className="row">
+          <input
+            className="history-search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Verlauf durchsuchen"
+          />
+        </div>
+      </Group>
+      {entries.length > 0 && (
+        <Group>
+          {entries.map((entry) => (
+            <div key={entry.id} className="row wide history-row">
+              <header>
+                <span className="row-hint">
+                  {new Date(entry.created_at).toLocaleString()} ·{" "}
+                  {entry.focused_app || "Unbekannte App"} ·{" "}
+                  {entry.post_processed ? "KI formatiert" : "Lokal"}
+                </span>
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="push"
+                    onClick={() => void deliverText(entry.final_text, "clipboard", false)}
+                  >
+                    Kopieren
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    aria-label="Eintrag löschen"
+                    onClick={() => historyDelete(entry.id).then(refresh)}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </header>
+              <p>{entry.final_text}</p>
+            </div>
+          ))}
+        </Group>
+      )}
+    </>
   );
 }
 
@@ -597,7 +624,6 @@ function Diagnostics() {
       setMessage(event.payload);
       refresh();
     });
-    // keep the pane live while a download started elsewhere is running
     const poll = window.setInterval(refresh, 3000);
     return () => {
       void unProgress.then((f) => f());
@@ -630,81 +656,81 @@ function Diagnostics() {
     progress && progress.total > 0
       ? Math.min(100, Math.round((progress.downloaded / progress.total) * 100))
       : 0;
-  const stateClass = failed
-    ? "error"
-    : asr?.installed
-      ? "ready"
-      : downloading
-        ? "determinate"
-        : "idle";
 
   return (
-    <div className="pane-stack">
-      <section className="group">
-        <h2>Lokale Transkription</h2>
-        <dl className="diagnostics">
-          <dt>Engine</dt>
-          <dd>{asr?.engine ?? "wird geprüft"}</dd>
-          <dt>Modell</dt>
-          <dd>
-            {asr?.installed
-              ? "installiert"
-              : downloading
-                ? "wird geladen"
-                : `nicht installiert (${formatBytes(asr?.total_bytes ?? 0)})`}
-          </dd>
-          <dt>Status</dt>
-          <dd>{asr?.loaded ? "im Speicher, sofort bereit" : "wird bei Bedarf geladen"}</dd>
-        </dl>
-        <div className={`setup-progress ${stateClass}`}>
-          <div className="setup-progress-bar">
-            <span style={downloading ? { width: `${Math.max(2, percent)}%` } : undefined} />
-          </div>
-          <p>
-            {failed
+    <>
+      <Group title="Lokale Transkription">
+        <Row label="Engine" hint={asr?.engine ?? "wird geprüft"}>
+          <span className={`status-pill ${asr?.installed ? "ok" : "warn"}`}>
+            {asr?.installed ? "Installiert" : downloading ? "Lädt…" : "Nicht installiert"}
+          </span>
+        </Row>
+        <Row
+          label="Modell"
+          hint={
+            failed
               ? message
               : downloading && progress
                 ? `${formatBytes(progress.downloaded)} von ${formatBytes(progress.total)} (${percent} %)`
                 : asr?.installed
-                  ? message || "Alles bereit. Die Transkription läuft vollständig lokal."
-                  : "Das Sprachmodell wird einmalig heruntergeladen (~670 MB). Danach ist keine Internetverbindung mehr nötig."}
-          </p>
-        </div>
-        <div className="button-row">
-          {!asr?.installed && !downloading && (
-            <button type="button" className="primary-btn" onClick={() => void startDownload()}>
-              <Download size={14} />
-              {failed ? "Erneut versuchen" : "Modell laden"}
-            </button>
-          )}
-          {downloading && (
-            <button type="button" className="soft-btn" onClick={() => void asrCancelDownload()}>
-              Abbrechen
-            </button>
-          )}
-          {asr?.installed && (
-            <button type="button" className="soft-btn" onClick={() => void removeModel()}>
-              <Trash2 size={14} />
-              Modell entfernen
-            </button>
-          )}
-        </div>
-      </section>
-      <section className="group">
-        <h2>macOS Berechtigungen</h2>
-        <dl className="diagnostics">
-          <dt>Bedienungshilfen</dt>
-          <dd>{access ? "erlaubt" : "nicht erlaubt — direktes Einfügen fällt auf die Zwischenablage zurück"}</dd>
-        </dl>
-        <button
-          type="button"
-          className="soft-btn"
-          onClick={() => requestAccessibility().then(setAccess)}
+                  ? asr?.loaded
+                    ? "Im Speicher, sofort bereit."
+                    : "Wird bei Bedarf geladen."
+                  : `Einmaliger Download, ${formatBytes(asr?.total_bytes ?? 0)}. Danach läuft alles offline.`
+          }
         >
-          <RefreshCw size={14} />
-          Berechtigung öffnen
-        </button>
-      </section>
-    </div>
+          <div className="btn-row">
+            {!asr?.installed && !downloading && (
+              <button type="button" className="push primary" onClick={() => void startDownload()}>
+                {failed ? "Erneut versuchen" : "Laden"}
+              </button>
+            )}
+            {downloading && (
+              <button type="button" className="push" onClick={() => void asrCancelDownload()}>
+                Abbrechen
+              </button>
+            )}
+            {asr?.installed && (
+              <button type="button" className="push" onClick={() => void removeModel()}>
+                Entfernen
+              </button>
+            )}
+          </div>
+        </Row>
+        {downloading && (
+          <div className="row wide">
+            <div className="progress-track">
+              <span style={{ width: `${Math.max(2, percent)}%` }} />
+            </div>
+          </div>
+        )}
+      </Group>
+
+      <Group title="macOS-Berechtigungen">
+        <Row
+          label="Bedienungshilfen"
+          hint={
+            access
+              ? "Direktes Einfügen ist möglich."
+              : "Ohne diese Berechtigung landet der Text in der Zwischenablage."
+          }
+        >
+          <div className="btn-row">
+            <span className={`status-pill ${access ? "ok" : "warn"}`}>
+              {access ? "Erlaubt" : "Nicht erlaubt"}
+            </span>
+            {!access && (
+              <button
+                type="button"
+                className="push"
+                onClick={() => requestAccessibility().then(setAccess)}
+              >
+                Öffnen
+              </button>
+            )}
+          </div>
+        </Row>
+      </Group>
+    </>
   );
 }

@@ -4,7 +4,6 @@ import {
   Clock3,
   Keyboard,
   Library,
-  Mic,
   Settings,
   Wrench,
 } from "lucide-react";
@@ -40,12 +39,11 @@ export default function SettingsApp() {
   }, []);
 
   return (
-    <main className="settings-window">
-      <aside className="settings-sidebar">
-        <div className="traffic-space" data-tauri-drag-region />
-        <div className="settings-brand" data-tauri-drag-region>
-          <Mic size={18} />
-          <span>VoiZe</span>
+    <div className="settings-window">
+      <aside className="settings-sidebar" data-tauri-drag-region>
+        <div className="settings-traffic" data-tauri-drag-region />
+        <div className="settings-app" data-tauri-drag-region>
+          VoiZe
         </div>
         <nav className="settings-nav">
           {NAV.map((item) => {
@@ -57,23 +55,27 @@ export default function SettingsApp() {
                 className={section === item.id ? "active" : ""}
                 onClick={() => setSection(item.id)}
               >
-                <Icon size={15} />
+                <span className="glyph">
+                  <Icon size={12} />
+                </span>
                 <span>{item.label}</span>
               </button>
             );
           })}
         </nav>
       </aside>
-      <section className="settings-content">
+      <main className="settings-content">
         <header className="settings-header" data-tauri-drag-region>
           {NAV.find((item) => item.id === section)?.label}
         </header>
-        <SettingsPanel
-          section={section}
-          settings={settings}
-          onSettings={setSettings}
-        />
-      </section>
-    </main>
+        <div className="settings-scroll">
+          <SettingsPanel
+            section={section}
+            settings={settings}
+            onSettings={setSettings}
+          />
+        </div>
+      </main>
+    </div>
   );
 }
