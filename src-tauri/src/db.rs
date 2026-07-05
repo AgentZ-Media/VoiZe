@@ -41,7 +41,6 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
           replacement TEXT,
           notes TEXT,
           priority INTEGER NOT NULL DEFAULT 0,
-          learned INTEGER NOT NULL DEFAULT 0,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
@@ -229,7 +228,6 @@ pub struct DictionaryEntry {
     pub replacement: Option<String>,
     pub notes: Option<String>,
     pub priority: bool,
-    pub learned: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -241,7 +239,6 @@ pub struct DictionaryInput {
     pub replacement: Option<String>,
     pub notes: Option<String>,
     pub priority: bool,
-    pub learned: bool,
 }
 
 #[tauri::command]
@@ -250,7 +247,7 @@ pub fn dictionary_list(app: tauri::AppHandle) -> Result<Vec<DictionaryEntry>, St
     let mut stmt = db
         .prepare(
             r#"
-            SELECT id, term, replacement, notes, priority, learned, created_at, updated_at
+            SELECT id, term, replacement, notes, priority, created_at, updated_at
             FROM dictionary
             ORDER BY priority DESC, lower(term) ASC
             "#,
@@ -264,9 +261,8 @@ pub fn dictionary_list(app: tauri::AppHandle) -> Result<Vec<DictionaryEntry>, St
                 replacement: row.get(2)?,
                 notes: row.get(3)?,
                 priority: row.get::<_, i64>(4)? != 0,
-                learned: row.get::<_, i64>(5)? != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         })
         .map_err(|e| e.to_string())?;
@@ -293,15 +289,14 @@ pub fn dictionary_upsert(
             r#"
             UPDATE dictionary
             SET term = ?1, replacement = ?2, notes = ?3, priority = ?4,
-                learned = ?5, updated_at = ?6
-            WHERE id = ?7
+                updated_at = ?5
+            WHERE id = ?6
             "#,
             params![
                 term,
                 entry.replacement,
                 entry.notes,
                 if entry.priority { 1 } else { 0 },
-                if entry.learned { 1 } else { 0 },
                 now,
                 id
             ],
@@ -311,13 +306,12 @@ pub fn dictionary_upsert(
     } else {
         db.execute(
             r#"
-            INSERT INTO dictionary (term, replacement, notes, priority, learned, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+            INSERT INTO dictionary (term, replacement, notes, priority, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
             ON CONFLICT(term) DO UPDATE SET
               replacement = excluded.replacement,
               notes = excluded.notes,
               priority = excluded.priority,
-              learned = excluded.learned,
               updated_at = excluded.updated_at
             "#,
             params![
@@ -325,7 +319,6 @@ pub fn dictionary_upsert(
                 entry.replacement,
                 entry.notes,
                 if entry.priority { 1 } else { 0 },
-                if entry.learned { 1 } else { 0 },
                 now
             ],
         )
@@ -340,7 +333,7 @@ pub fn dictionary_upsert(
 fn dictionary_get(db: &Connection, id: i64) -> Result<DictionaryEntry, String> {
     db.query_row(
         r#"
-        SELECT id, term, replacement, notes, priority, learned, created_at, updated_at
+        SELECT id, term, replacement, notes, priority, created_at, updated_at
         FROM dictionary WHERE id = ?1
         "#,
         [id],
@@ -351,9 +344,8 @@ fn dictionary_get(db: &Connection, id: i64) -> Result<DictionaryEntry, String> {
                 replacement: row.get(2)?,
                 notes: row.get(3)?,
                 priority: row.get::<_, i64>(4)? != 0,
-                learned: row.get::<_, i64>(5)? != 0,
-                created_at: row.get(6)?,
-                updated_at: row.get(7)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
             })
         },
     )
@@ -387,15 +379,14 @@ pub fn dictionary_replace_all(
         tx.execute(
             r#"
             INSERT OR IGNORE INTO dictionary
-              (term, replacement, notes, priority, learned, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)
+              (term, replacement, notes, priority, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?5)
             "#,
             params![
                 term,
                 entry.replacement,
                 entry.notes,
                 if entry.priority { 1 } else { 0 },
-                if entry.learned { 1 } else { 0 },
                 now
             ],
         )
@@ -403,49 +394,4 @@ pub fn dictionary_replace_all(
     }
     tx.commit().map_err(|e| e.to_string())?;
     dictionary_list(app)
-}
-
-#[derive(Serialize)]
-pub struct LearningCandidate {
-    pub term: String,
-    pub count: u32,
-}
-
-#[tauri::command]
-pub fn learning_candidates(app: tauri::AppHandle) -> Result<Vec<LearningCandidate>, String> {
-    let db = conn(&app)?;
-    let mut stmt = db
-        .prepare(
-            r#"
-            SELECT final_text FROM history
-            WHERE created_at >= datetime('now', '-7 days')
-            ORDER BY created_at DESC
-            LIMIT 300
-            "#,
-        )
-        .map_err(|e| e.to_string())?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|e| e.to_string())?;
-    let mut counts = std::collections::HashMap::<String, u32>::new();
-    for row in rows {
-        let text = row.map_err(|e| e.to_string())?;
-        for token in text.split_whitespace() {
-            let clean = token
-                .trim_matches(|c: char| !c.is_alphanumeric() && c != '-' && c != '_')
-                .to_string();
-            if clean.len() < 4 || clean.chars().all(|c| c.is_lowercase()) {
-                continue;
-            }
-            *counts.entry(clean).or_insert(0) += 1;
-        }
-    }
-    let mut out = counts
-        .into_iter()
-        .filter(|(_, count)| *count >= 2)
-        .map(|(term, count)| LearningCandidate { term, count })
-        .collect::<Vec<_>>();
-    out.sort_by(|a, b| b.count.cmp(&a.count).then(a.term.cmp(&b.term)));
-    out.truncate(40);
-    Ok(out)
 }

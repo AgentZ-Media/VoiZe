@@ -78,7 +78,13 @@ pub fn setup(app: &tauri::AppHandle) -> tauri::Result<()> {
                 let _ = app.emit("settings-open", "general");
             }
             "quit" => {
-                app.exit(0);
+                // Hard exit: `app.exit(0)` shuts down gracefully and can hang
+                // on in-flight plugin/background threads (updater, model load),
+                // leaving a zombie process. macOS then reactivates that zombie
+                // on the next launch instead of starting fresh, so the app
+                // appears permanently broken until it is force-killed. Exiting
+                // the process directly guarantees a clean slate on relaunch.
+                std::process::exit(0);
             }
             _ => {}
         })

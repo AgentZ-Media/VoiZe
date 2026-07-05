@@ -65,8 +65,6 @@ export const dictionaryDelete = (id: number) =>
   invoke<boolean>("dictionary_delete", { id });
 export const dictionaryReplaceAll = (entries: DictionaryInput[]) =>
   invoke<DictionaryEntry[]>("dictionary_replace_all", { entries });
-export const learningCandidates = () =>
-  invoke<{ term: string; count: number }[]>("learning_candidates");
 
 export const openrouterModels = async () => {
   const value = await invoke<{ data: OpenRouterModel[] }>("openrouter_models");

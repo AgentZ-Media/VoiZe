@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Hardened Runtime is enabled by the Tauri bundler when the app is signed
+	  with an identity. Under hardened runtime the system blocks microphone
+	  access unless the app carries this entitlement — without it getUserMedia
+	  fails permanently and no relaunch recovers. NSMicrophoneUsageDescription
+	  (see Info.plist) only supplies the TCC prompt text; this entitlement is
+	  what actually permits the request.
+	-->
+	<key>com.apple.security.device.audio-input</key>
+	<true/>
+</dict>
+</plist>

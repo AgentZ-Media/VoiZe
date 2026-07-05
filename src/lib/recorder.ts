@@ -4,68 +4,38 @@ export interface Recording {
   durationMs: number;
 }
 
-// Runs inside the AudioWorklet realm; posts each 128-frame block to the
-// main thread. Kept as source text so it can be loaded from a Blob URL
-// without a separate bundler entry.
-const WORKLET_SOURCE = `
-class CaptureProcessor extends AudioWorkletProcessor {
-  process(inputs) {
-    const channel = inputs[0] && inputs[0][0];
-    if (channel && channel.length) {
-      const copy = new Float32Array(channel.length);
-      copy.set(channel);
-      this.port.postMessage(copy, [copy.buffer]);
+/// WKWebView's MediaRecorder produces AAC-in-MP4 ("audio/mp4"); opus/webm is
+/// preferred where available. decodeAudioData below handles either container.
+function pickMime(): string {
+  for (const m of ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"]) {
+    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(m)) {
+      return m;
     }
-    return true;
   }
-}
-registerProcessor("voize-capture", CaptureProcessor);
-`;
-
-let workletUrl: string | null = null;
-
-function getWorkletUrl(): string {
-  if (!workletUrl) {
-    workletUrl = URL.createObjectURL(
-      new Blob([WORKLET_SOURCE], { type: "application/javascript" }),
-    );
-  }
-  return workletUrl;
+  return "";
 }
 
-function rms(block: Float32Array): number {
-  let sum = 0;
-  for (let i = 0; i < block.length; i += 1) sum += block[i] * block[i];
-  return Math.sqrt(sum / block.length);
-}
-
-/// Resample captured Float32 audio to 16 kHz mono and encode as base64
-/// 16-bit PCM. OfflineAudioContext does the band-limited resampling.
-async function toPcm16kBase64(
-  chunks: Float32Array[],
-  sourceRate: number,
-): Promise<string> {
+/// Decode a recorded blob (webm/opus or mp4/aac) and resample it to what the
+/// local Parakeet model expects: 16 kHz mono 16-bit PCM, base64 without a WAV
+/// header. Decoding at the native rate first and rendering through an
+/// OfflineAudioContext is the resample path that works reliably in WebKit.
+async function blobToPcm16kBase64(blob: Blob): Promise<string> {
+  if (blob.size === 0) return "";
   const RATE = 16000;
-  const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-  if (total === 0) return "";
-  const merged = new Float32Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.length;
+  const probe = new AudioContext();
+  let decoded: AudioBuffer;
+  try {
+    decoded = await probe.decodeAudioData(await blob.arrayBuffer());
+  } finally {
+    void probe.close().catch(() => {});
   }
-  let mono = merged;
-  if (sourceRate !== RATE) {
-    const frames = Math.max(1, Math.ceil((total / sourceRate) * RATE));
-    const off = new OfflineAudioContext(1, frames, RATE);
-    const buffer = off.createBuffer(1, total, sourceRate);
-    buffer.copyToChannel(merged, 0);
-    const src = off.createBufferSource();
-    src.buffer = buffer;
-    src.connect(off.destination);
-    src.start();
-    mono = (await off.startRendering()).getChannelData(0);
-  }
+  const frames = Math.max(1, Math.ceil(decoded.duration * RATE));
+  const off = new OfflineAudioContext(1, frames, RATE);
+  const src = off.createBufferSource();
+  src.buffer = decoded;
+  src.connect(off.destination);
+  src.start();
+  const mono = (await off.startRendering()).getChannelData(0);
   const pcm = new Int16Array(mono.length);
   for (let i = 0; i < mono.length; i += 1) {
     const v = Math.max(-1, Math.min(1, mono[i]));
@@ -73,6 +43,8 @@ async function toPcm16kBase64(
   }
   const bytes = new Uint8Array(pcm.buffer);
   let bin = "";
+  // String.fromCharCode in bounded chunks — one call over minutes of audio
+  // would blow the argument limit
   for (let i = 0; i < bytes.length; i += 0x8000) {
     bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
@@ -82,21 +54,18 @@ async function toPcm16kBase64(
 export class VoiceRecorder {
   private ctx: AudioContext | null = null;
   private stream: MediaStream | null = null;
-  private source: MediaStreamAudioSourceNode | null = null;
-  private worklet: AudioWorkletNode | null = null;
-  private processor: ScriptProcessorNode | null = null;
+  private recorder: MediaRecorder | null = null;
+  private analyser: AnalyserNode | null = null;
   private sink: GainNode | null = null;
+  private parts: Blob[] = [];
+  private mime = "";
   private levelFrame = 0;
   private smoothedLevel = 0;
-  /// latest RMS straight from the capture path — the level meter reads
-  /// this instead of an AnalyserNode (WebKit doesn't reliably pull
-  /// analysers that aren't on a path to the destination)
-  private currentRms = 0;
-  /// slowly decaying peak for adaptive normalization: raw capture (no
-  /// AGC) is quiet and mic levels vary wildly — normalizing against the
-  /// recent peak makes the waveform deflect fully from the first word
+  /// slowly decaying peak for adaptive normalization: raw capture (no AGC) is
+  /// quiet and mic levels vary wildly — normalizing against the recent peak
+  /// makes the waveform deflect fully from the first word
   private peak = 0;
-  private chunks: Float32Array[] = [];
+  private timeBuf = new Float32Array(0);
   private startedAt = 0;
 
   get running() {
@@ -105,14 +74,15 @@ export class VoiceRecorder {
 
   async start(onLevel: (value: number) => void): Promise<void> {
     if (this.ctx) return;
-    this.chunks = [];
-    this.currentRms = 0;
+    this.parts = [];
     this.peak = 0;
+    this.smoothedLevel = 0;
     this.startedAt = performance.now();
-    // Echo cancellation / noise suppression / AGC stay off: WKWebView's
-    // audio processing chain ramps up for ~0.6-1 s after the track opens
-    // and delivers pure silence first — push-to-talk would swallow the
-    // first word. The raw signal transcribes fine.
+
+    // Echo cancellation / noise suppression / AGC stay off: WKWebView's audio
+    // processing chain ramps up for ~0.6-1 s after the track opens and delivers
+    // pure silence first — push-to-talk would swallow the first word. The raw
+    // signal transcribes fine.
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         echoCancellation: false,
@@ -120,48 +90,54 @@ export class VoiceRecorder {
         autoGainControl: false,
       },
     });
+
+    // Capture with MediaRecorder, not a live AudioWorklet. MediaRecorder
+    // buffers the *complete* take from the first frame; the worklet approach
+    // dropped the opening while its module compiled (addModule is async) and
+    // the trailing blocks still in flight at stop — that is what made words go
+    // missing at the start and end. Decode + resample happens after stop.
+    this.mime = pickMime();
+    const recorder = this.mime
+      ? new MediaRecorder(stream, { mimeType: this.mime })
+      : new MediaRecorder(stream);
+    if (!this.mime) this.mime = recorder.mimeType || "audio/mp4";
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) this.parts.push(event.data);
+    };
+    recorder.start();
+
+    // Separate live-level path: source -> analyser -> silent sink -> destination.
+    // The sink (gain 0) keeps the graph pulled so WebKit actually advances the
+    // analyser — an analyser with no path to the destination goes stale in
+    // WKWebView. This drives only the waveform; the recording comes from
+    // MediaRecorder above.
     const ctx = new AudioContext();
     await ctx.resume();
-    const source = ctx.createMediaStreamSource(stream);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 1024;
     const sink = ctx.createGain();
     sink.gain.value = 0;
+    ctx.createMediaStreamSource(stream).connect(analyser);
+    analyser.connect(sink);
+    sink.connect(ctx.destination);
+    this.timeBuf = new Float32Array(analyser.fftSize);
 
-    const capture = (block: Float32Array) => {
-      this.chunks.push(block);
-      this.currentRms = rms(block);
-    };
-
-    try {
-      await ctx.audioWorklet.addModule(getWorkletUrl());
-      const worklet = new AudioWorkletNode(ctx, "voize-capture", {
-        numberOfInputs: 1,
-        numberOfOutputs: 1,
-        channelCount: 1,
-      });
-      worklet.port.onmessage = (event: MessageEvent<Float32Array>) => {
-        capture(event.data);
-      };
-      source.connect(worklet);
-      worklet.connect(sink);
-      this.worklet = worklet;
-    } catch {
-      // deprecated but universally supported fallback
-      const processor = ctx.createScriptProcessor(1024, 1, 1);
-      processor.onaudioprocess = (event) => {
-        const data = event.inputBuffer.getChannelData(0);
-        const copy = new Float32Array(data.length);
-        copy.set(data);
-        capture(copy);
-      };
-      source.connect(processor);
-      processor.connect(sink);
-      this.processor = processor;
-    }
+    this.ctx = ctx;
+    this.stream = stream;
+    this.recorder = recorder;
+    this.analyser = analyser;
+    this.sink = sink;
 
     const updateLevel = () => {
-      if (!this.ctx) return;
-      this.peak = Math.max(this.currentRms, this.peak * 0.996, 0.01);
-      const norm = Math.min(1, this.currentRms / this.peak);
+      if (!this.ctx || !this.analyser) return;
+      this.analyser.getFloatTimeDomainData(this.timeBuf);
+      let sum = 0;
+      for (let i = 0; i < this.timeBuf.length; i += 1) {
+        sum += this.timeBuf[i] * this.timeBuf[i];
+      }
+      const rms = Math.sqrt(sum / this.timeBuf.length);
+      this.peak = Math.max(rms, this.peak * 0.996, 0.01);
+      const norm = Math.min(1, rms / this.peak);
       // perceptual curve: quiet speech still moves the bars visibly
       const target = Math.pow(norm, 0.6);
       // fast attack, slower release — speech onsets hit immediately
@@ -170,13 +146,24 @@ export class VoiceRecorder {
       onLevel(this.smoothedLevel);
       this.levelFrame = window.requestAnimationFrame(updateLevel);
     };
-    sink.connect(ctx.destination);
-    this.ctx = ctx;
-    this.stream = stream;
-    this.source = source;
-    this.sink = sink;
-    this.smoothedLevel = 0;
     this.levelFrame = window.requestAnimationFrame(updateLevel);
+  }
+
+  /// Stop the recorder and resolve with the finished blob — onstop flushes
+  /// every buffered chunk, so nothing is lost at the tail.
+  private finishRecorder(): Promise<Blob | null> {
+    return new Promise((resolve) => {
+      const r = this.recorder;
+      this.recorder = null;
+      const collect = () =>
+        this.parts.length ? new Blob(this.parts, { type: this.mime }) : null;
+      if (!r || r.state === "inactive") {
+        resolve(collect());
+        return;
+      }
+      r.onstop = () => resolve(collect());
+      r.stop();
+    });
   }
 
   async stop(): Promise<Recording> {
@@ -187,23 +174,20 @@ export class VoiceRecorder {
     const durationMs = Math.max(0, performance.now() - this.startedAt);
     if (this.levelFrame) window.cancelAnimationFrame(this.levelFrame);
     this.levelFrame = 0;
-    if (this.worklet) this.worklet.port.onmessage = null;
-    this.worklet?.disconnect();
-    this.processor?.disconnect();
-    this.source?.disconnect();
+
+    const blob = await this.finishRecorder();
+
+    this.analyser?.disconnect();
     this.sink?.disconnect();
     this.stream?.getTracks().forEach((track) => track.stop());
-    const sampleRate = ctx.sampleRate;
-    this.worklet = null;
-    this.processor = null;
-    this.source = null;
+    this.analyser = null;
     this.sink = null;
     this.stream = null;
     this.ctx = null;
     await ctx.close().catch(() => {});
-    const chunks = this.chunks;
-    this.chunks = [];
-    const pcmB64 = await toPcm16kBase64(chunks, sampleRate);
+    this.parts = [];
+
+    const pcmB64 = blob ? await blobToPcm16kBase64(blob) : "";
     return { pcmB64, durationMs };
   }
 }

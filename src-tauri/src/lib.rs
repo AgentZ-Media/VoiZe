@@ -10,8 +10,10 @@ mod tray;
 use tauri::Manager;
 
 #[tauri::command]
-fn app_exit(app: tauri::AppHandle) {
-    app.exit(0);
+fn app_exit(_app: tauri::AppHandle) {
+    // Hard exit — see the tray "quit" handler for why graceful shutdown is
+    // avoided (zombie process gets reactivated on the next launch).
+    std::process::exit(0);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -75,7 +77,6 @@ pub fn run() {
             db::dictionary_upsert,
             db::dictionary_delete,
             db::dictionary_replace_all,
-            db::learning_candidates,
             native::activation_start,
             native::activation_stop,
             native::accessibility_status,

@@ -11,9 +11,6 @@ pub struct Settings {
     pub openrouter_api_key: String,
     pub postprocess_enabled: bool,
     pub postprocess_model: String,
-    pub learning_enabled: bool,
-    pub learning_model: String,
-    pub learning_interval_hours: u32,
     pub hotkey: String,
     pub hands_free_hotkey: String,
     pub output_mode: String,
@@ -25,7 +22,6 @@ pub struct Settings {
     pub smart_formatting: bool,
     pub asr_model_ready: bool,
     pub custom_instructions: String,
-    pub last_learning_at: Option<String>,
 }
 
 impl Default for Settings {
@@ -34,9 +30,6 @@ impl Default for Settings {
             openrouter_api_key: String::new(),
             postprocess_enabled: true,
             postprocess_model: "google/gemini-3.1-flash-lite".into(),
-            learning_enabled: true,
-            learning_model: "google/gemini-3.1-flash-lite".into(),
-            learning_interval_hours: 6,
             hotkey: "Fn".into(),
             hands_free_hotkey: "Fn+Space".into(),
             output_mode: "insert".into(),
@@ -48,7 +41,6 @@ impl Default for Settings {
             smart_formatting: true,
             asr_model_ready: false,
             custom_instructions: String::new(),
-            last_learning_at: None,
         }
     }
 }
@@ -62,12 +54,6 @@ fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 fn normalize(settings: &mut Settings) {
     if settings.postprocess_model.trim().is_empty() {
         settings.postprocess_model = "google/gemini-3.1-flash-lite".into();
-    }
-    if settings.learning_model.trim().is_empty() {
-        settings.learning_model = settings.postprocess_model.clone();
-    }
-    if settings.learning_interval_hours == 0 {
-        settings.learning_interval_hours = 6;
     }
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = "Fn".into();

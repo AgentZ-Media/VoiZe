@@ -11,11 +11,9 @@ import {
   asrStatus,
   deliverText,
   dictionaryList,
-  dictionaryUpsert,
   getSettings,
   historyInsert,
   hudCollapsed,
-  learningCandidates,
   openrouterChat,
   playStatusSound,
   positionHud,
@@ -208,65 +206,16 @@ export default function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [state]);
 
-  const runLearning = useCallback(async (s: Settings) => {
-    if (!s.learning_enabled || !s.openrouter_api_key.trim()) return;
-    const last = s.last_learning_at ? Date.parse(s.last_learning_at) : 0;
-    const dueMs = s.learning_interval_hours * 60 * 60 * 1000;
-    if (last && Date.now() - last < dueMs) return;
-    const candidates = await learningCandidates().catch(() => []);
-    if (!candidates.length) {
-      await saveSettings({ ...s, last_learning_at: new Date().toISOString() }).catch(() => {});
-      return;
-    }
-    const existing = await dictionaryList().catch(() => []);
-    const prompt = [
-      "Suggest personal dictionary additions from these recurring dictation terms.",
-      "Return strict JSON array only. Each item: {\"term\":\"...\",\"notes\":\"...\"}.",
-      "Only include proper nouns, product names, unusual spellings, acronyms, or recurring words likely to be mistranscribed.",
-      "Do not include generic words.",
-      `Existing dictionary: ${existing.map((e) => e.term).join(", ")}`,
-      `Candidates: ${candidates.map((c) => `${c.term} (${c.count})`).join(", ")}`,
-    ].join("\n");
-    const raw = await openrouterChat(
-      s.learning_model,
-      [
-        { role: "system", content: "You maintain a concise speech dictation dictionary." },
-        { role: "user", content: prompt },
-      ],
-      0.1,
-    ).catch(() => "[]");
-    try {
-      const parsed = JSON.parse(raw) as { term?: string; notes?: string }[];
-      for (const item of parsed.slice(0, 12)) {
-        if (!item.term?.trim()) continue;
-        await dictionaryUpsert({
-          term: item.term.trim(),
-          notes: item.notes ?? "Automatically learned from recent dictations.",
-          replacement: null,
-          priority: false,
-          learned: true,
-        }).catch(() => {});
-      }
-      const next = { ...s, last_learning_at: new Date().toISOString() };
-      await saveSettings(next);
-      settingsRef.current = next;
-      setSettings(next);
-    } catch {
-      await saveSettings({ ...s, last_learning_at: new Date().toISOString() }).catch(() => {});
-    }
-  }, []);
-
   const startRuntime = useCallback((s: Settings) => {
     runtimeStarted.current = true;
     void activationStart(s.hotkey, s.hands_free_hotkey);
     void registerFallbacks(s);
-    void runLearning(s);
     if (s.auto_update_on_launch) {
       void check()
         .then((update) => update?.downloadAndInstall().then(() => relaunch()))
         .catch(() => {});
     }
-  }, [registerFallbacks, runLearning]);
+  }, [registerFallbacks]);
 
   /// Model install gate: hotkeys only go live once the local model is on
   /// disk. If it's missing, the settings window opens on the diagnostics

@@ -3,7 +3,7 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { Keyboard, Plus, Trash2 } from "lucide-react";
-import type { ReactNode } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
   accessibilityStatus,
@@ -400,35 +400,11 @@ function AI({
         />
       </Group>
 
-      <Group title="Modelle">
+      <Group title="Modell">
         <Row wide label="Nachbearbeitung">
           <ModelSelect
             value={form.postprocess_model}
             onChange={(postprocess_model) => set({ postprocess_model })}
-          />
-        </Row>
-        <Row wide label="Lernen">
-          <ModelSelect
-            value={form.learning_model}
-            onChange={(learning_model) => set({ learning_model })}
-          />
-        </Row>
-      </Group>
-
-      <Group title="Lernendes Wörterbuch">
-        <SwitchRow
-          label="Vorschläge lernen"
-          hint="Analysiert den lokalen Verlauf und ergänzt plausible Eigennamen."
-          checked={form.learning_enabled}
-          onChange={(learning_enabled) => set({ learning_enabled })}
-        />
-        <Row label="Intervall in Stunden">
-          <input
-            type="number"
-            min={1}
-            max={48}
-            value={form.learning_interval_hours}
-            onChange={(e) => set({ learning_interval_hours: Number(e.target.value) })}
           />
         </Row>
       </Group>
@@ -468,7 +444,6 @@ function Dictionary() {
       replacement: replacement.trim() || null,
       notes: notes.trim() || null,
       priority: false,
-      learned: false,
     });
     setTerm("");
     setReplacement("");
@@ -476,34 +451,86 @@ function Dictionary() {
     refresh();
   }
 
+  const onEnter = (e: KeyboardEvent) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      void add();
+    }
+  };
+
   return (
     <>
       <Group title="Neuer Eintrag">
-        <div className="row wide">
-          <div className="dictionary-editor">
-            <input value={term} onChange={(e) => setTerm(e.target.value)} placeholder="Begriff" />
+        <div className="dictionary-form">
+          <p className="dictionary-intro">
+            Begriffe, die beim Diktieren oft falsch geschrieben werden – Namen,
+            Produkte oder Fachwörter. Mit <strong>Ersetzung</strong> wird der
+            Begriff direkt ausgetauscht; ohne Ersetzung achtet nur die
+            Nachbearbeitung auf die richtige Schreibweise.
+          </p>
+          <label className="field">
+            <span className="field-label">Begriff</span>
             <input
-              value={replacement}
-              onChange={(e) => setReplacement(e.target.value)}
-              placeholder="Ersetzung (optional)"
+              type="text"
+              value={term}
+              onChange={(e) => setTerm(e.target.value)}
+              onKeyDown={onEnter}
+              placeholder="z. B. VoiZe"
             />
-            <input value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Notiz" />
-            <button type="button" className="push primary square" onClick={() => void add()}>
-              <Plus size={14} />
-            </button>
+          </label>
+          <div className="field-pair">
+            <label className="field">
+              <span className="field-label">
+                Ersetzung <em>optional</em>
+              </span>
+              <input
+                type="text"
+                value={replacement}
+                onChange={(e) => setReplacement(e.target.value)}
+                onKeyDown={onEnter}
+                placeholder="Korrekte Schreibweise"
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">
+                Notiz <em>optional</em>
+              </span>
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                onKeyDown={onEnter}
+                placeholder="Nur zur Erinnerung"
+              />
+            </label>
           </div>
+          <button
+            type="button"
+            className="push primary dictionary-add"
+            onClick={() => void add()}
+            disabled={!term.trim()}
+          >
+            <Plus size={14} />
+            Hinzufügen
+          </button>
         </div>
       </Group>
-      {entries.length > 0 && (
-        <Group title={`${entries.length} Einträge`}>
+      {entries.length > 0 ? (
+        <Group title={`${entries.length} ${entries.length === 1 ? "Eintrag" : "Einträge"}`}>
           {entries.map((entry) => (
-            <div key={entry.id} className="row">
+            <div key={entry.id} className="row dictionary-entry">
               <div className="row-text">
-                <span className="row-label">{entry.term}</span>
-                <span className="row-hint">
-                  {entry.replacement ? `→ ${entry.replacement}` : "Priorisierter Begriff"}
-                  {entry.learned ? " · gelernt" : ""}
+                <span className="row-label">
+                  {entry.term}
+                  {entry.replacement && (
+                    <span className="dictionary-arrow"> → {entry.replacement}</span>
+                  )}
                 </span>
+                {entry.notes ? (
+                  <span className="row-hint">{entry.notes}</span>
+                ) : !entry.replacement ? (
+                  <span className="row-hint">Achtet auf die Schreibweise</span>
+                ) : null}
               </div>
               <div className="row-ctl">
                 <button
@@ -518,6 +545,8 @@ function Dictionary() {
             </div>
           ))}
         </Group>
+      ) : (
+        <p className="dictionary-empty">Noch keine Einträge.</p>
       )}
     </>
   );
