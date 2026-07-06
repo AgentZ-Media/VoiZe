@@ -1,6 +1,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
+  BarChart3,
   Bot,
   Clock3,
   Keyboard,
@@ -15,6 +16,7 @@ import type { Settings as SettingsType } from "./lib/types";
 import SettingsPanel, { type SettingsSection } from "./components/SettingsPanel";
 
 const NAV: { id: SettingsSection; label: string; icon: ComponentType<{ size?: number }> }[] = [
+  { id: "insights", label: "Insights", icon: BarChart3 },
   { id: "general", label: "Allgemein", icon: Settings },
   { id: "shortcuts", label: "Kurzbefehle", icon: Keyboard },
   { id: "ai", label: "KI", icon: Bot },
@@ -24,7 +26,7 @@ const NAV: { id: SettingsSection; label: string; icon: ComponentType<{ size?: nu
 ];
 
 export default function SettingsApp() {
-  const [section, setSection] = useState<SettingsSection>("general");
+  const [section, setSection] = useState<SettingsSection>("insights");
   const [settings, setSettings] = useState<SettingsType | null>(null);
   const [version, setVersion] = useState("");
 

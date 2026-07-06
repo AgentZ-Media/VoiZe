@@ -13,6 +13,7 @@ export interface Settings {
   smart_formatting: boolean;
   asr_model_ready: boolean;
   custom_instructions: string;
+  learning_enabled: boolean;
 }
 
 export interface ScreenContext {
@@ -81,6 +82,45 @@ export interface UsageSummary {
   reasoning_tokens: number;
   total_tokens: number;
   cost: number;
+}
+
+/** Dictation statistics over a time window. */
+export interface AppInsight {
+  app: string;
+  count: number;
+  words: number;
+}
+
+export interface InsightsSummary {
+  count: number;
+  words: number;
+  duration_ms: number;
+  top_apps: AppInsight[];
+}
+
+/** A dictionary correction proposed by the background learning pass. */
+export interface DictSuggestion {
+  id: number;
+  created_at: string;
+  term: string;
+  replacement: string;
+  reason: string | null;
+  evidence: string | null;
+  occurrences: number;
+  status: string;
+}
+
+export interface LearnStatus {
+  last_run_at: string | null;
+  pending: number;
+  unanalyzed: number;
+  running: boolean;
+}
+
+export interface LearnRunResult {
+  analyzed: number;
+  new_suggestions: number;
+  skipped: string | null;
 }
 
 export interface DictionaryEntry {

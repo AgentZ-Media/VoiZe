@@ -4,7 +4,11 @@ import type {
   ChatResult,
   DictionaryEntry,
   DictionaryInput,
+  DictSuggestion,
   HistoryEntry,
+  InsightsSummary,
+  LearnRunResult,
+  LearnStatus,
   NewHistoryEntry,
   OpenRouterModel,
   ScreenContext,
@@ -60,6 +64,21 @@ export const historyDelete = (id: number) =>
   invoke<boolean>("history_delete", { id });
 export const usageSummary = (from?: string | null, to?: string | null) =>
   invoke<UsageSummary>("usage_summary", { from: from ?? null, to: to ?? null });
+
+export const insightsSummary = (from?: string | null, to?: string | null) =>
+  invoke<InsightsSummary>("insights_summary", {
+    from: from ?? null,
+    to: to ?? null,
+  });
+
+export const suggestionsList = () =>
+  invoke<DictSuggestion[]>("suggestions_list");
+export const suggestionAccept = (id: number) =>
+  invoke<DictionaryEntry>("suggestion_accept", { id });
+export const suggestionDismiss = (id: number) =>
+  invoke<boolean>("suggestion_dismiss", { id });
+export const learnRunNow = () => invoke<LearnRunResult>("learn_run_now");
+export const learnStatus = () => invoke<LearnStatus>("learn_status");
 
 export const dictionaryList = () =>
   invoke<DictionaryEntry[]>("dictionary_list");

@@ -44,6 +44,21 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS dict_suggestions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL,
+          term TEXT NOT NULL,
+          replacement TEXT NOT NULL,
+          reason TEXT,
+          evidence TEXT,
+          occurrences INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'pending',
+          UNIQUE(term, replacement)
+        );
+        CREATE TABLE IF NOT EXISTS learn_meta (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
         "#,
     )?;
     ensure_history_columns(&db)?;
@@ -467,6 +482,314 @@ pub fn dictionary_delete(app: tauri::AppHandle, id: i64) -> Result<bool, String>
         .execute("DELETE FROM dictionary WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
     Ok(n > 0)
+}
+
+#[derive(Serialize)]
+pub struct AppInsight {
+    pub app: String,
+    pub count: i64,
+    pub words: i64,
+}
+
+#[derive(Serialize, Default)]
+pub struct InsightsSummary {
+    pub count: i64,
+    pub words: i64,
+    pub duration_ms: i64,
+    pub top_apps: Vec<AppInsight>,
+}
+
+/// Dictation statistics over an optional time window (same RFC3339 bounds
+/// semantics as `usage_summary`). Word counts come from the delivered text,
+/// so they reflect what actually landed in the target app.
+#[tauri::command]
+pub fn insights_summary(
+    app: tauri::AppHandle,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<InsightsSummary, String> {
+    let db = conn(&app)?;
+    let mut stmt = db
+        .prepare(
+            r#"
+            SELECT final_text, duration_ms, focused_app
+            FROM history
+            WHERE (?1 IS NULL OR created_at >= ?1)
+              AND (?2 IS NULL OR created_at < ?2)
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![from, to], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, Option<i64>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut summary = InsightsSummary::default();
+    let mut apps: std::collections::HashMap<String, (i64, i64)> = Default::default();
+    for row in rows {
+        let (final_text, duration_ms, focused_app) = row.map_err(|e| e.to_string())?;
+        let words = final_text.split_whitespace().count() as i64;
+        summary.count += 1;
+        summary.words += words;
+        summary.duration_ms += duration_ms.unwrap_or(0);
+        let key = focused_app
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or_else(|| "Unbekannte App".into());
+        let entry = apps.entry(key).or_insert((0, 0));
+        entry.0 += 1;
+        entry.1 += words;
+    }
+    let mut top: Vec<AppInsight> = apps
+        .into_iter()
+        .map(|(app, (count, words))| AppInsight { app, count, words })
+        .collect();
+    top.sort_by(|a, b| b.words.cmp(&a.words));
+    top.truncate(6);
+    summary.top_apps = top;
+    Ok(summary)
+}
+
+#[derive(Serialize, Clone)]
+pub struct DictSuggestion {
+    pub id: i64,
+    pub created_at: String,
+    pub term: String,
+    pub replacement: String,
+    pub reason: Option<String>,
+    pub evidence: Option<String>,
+    pub occurrences: i64,
+    pub status: String,
+}
+
+fn row_to_suggestion(row: &rusqlite::Row<'_>) -> rusqlite::Result<DictSuggestion> {
+    Ok(DictSuggestion {
+        id: row.get(0)?,
+        created_at: row.get(1)?,
+        term: row.get(2)?,
+        replacement: row.get(3)?,
+        reason: row.get(4)?,
+        evidence: row.get(5)?,
+        occurrences: row.get(6)?,
+        status: row.get(7)?,
+    })
+}
+
+#[tauri::command]
+pub fn suggestions_list(app: tauri::AppHandle) -> Result<Vec<DictSuggestion>, String> {
+    let db = conn(&app)?;
+    let mut stmt = db
+        .prepare(
+            r#"
+            SELECT id, created_at, term, replacement, reason, evidence, occurrences, status
+            FROM dict_suggestions
+            WHERE status = 'pending'
+            ORDER BY occurrences DESC, created_at DESC
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], row_to_suggestion)
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+/// Accept a suggestion: it becomes a regular dictionary entry (the reason is
+/// kept as the entry's note so the origin stays visible) and is marked
+/// accepted so the analyzer never proposes the same pair again.
+#[tauri::command]
+pub fn suggestion_accept(app: tauri::AppHandle, id: i64) -> Result<DictionaryEntry, String> {
+    let suggestion = {
+        let db = conn(&app)?;
+        db.query_row(
+            r#"
+            SELECT id, created_at, term, replacement, reason, evidence, occurrences, status
+            FROM dict_suggestions WHERE id = ?1
+            "#,
+            [id],
+            row_to_suggestion,
+        )
+        .map_err(|e| e.to_string())?
+    };
+    let entry = dictionary_upsert(
+        app.clone(),
+        DictionaryInput {
+            id: None,
+            term: suggestion.term,
+            replacement: Some(suggestion.replacement),
+            notes: suggestion.reason,
+            priority: false,
+        },
+    )?;
+    let db = conn(&app)?;
+    db.execute(
+        "UPDATE dict_suggestions SET status = 'accepted' WHERE id = ?1",
+        [id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(entry)
+}
+
+#[tauri::command]
+pub fn suggestion_dismiss(app: tauri::AppHandle, id: i64) -> Result<bool, String> {
+    let db = conn(&app)?;
+    let n = db
+        .execute(
+            "UPDATE dict_suggestions SET status = 'dismissed' WHERE id = ?1",
+            [id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+// ---- helpers for the background learning pass (see learn.rs) ----
+
+pub fn meta_get(app: &tauri::AppHandle, key: &str) -> Option<String> {
+    let db = conn(app).ok()?;
+    db.query_row(
+        "SELECT value FROM learn_meta WHERE key = ?1",
+        [key],
+        |row| row.get::<_, String>(0),
+    )
+    .ok()
+}
+
+pub fn meta_set(app: &tauri::AppHandle, key: &str, value: &str) -> Result<(), String> {
+    let db = conn(app)?;
+    db.execute(
+        r#"
+        INSERT INTO learn_meta (key, value) VALUES (?1, ?2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        "#,
+        params![key, value],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+pub struct HistoryPair {
+    pub id: i64,
+    pub raw_text: String,
+    pub final_text: String,
+}
+
+/// Oldest-first batch of history entries the analyzer has not seen yet.
+pub fn history_after(
+    app: &tauri::AppHandle,
+    after_id: i64,
+    limit: u32,
+) -> Result<Vec<HistoryPair>, String> {
+    let db = conn(app)?;
+    let mut stmt = db
+        .prepare(
+            r#"
+            SELECT id, raw_text, final_text FROM history
+            WHERE id > ?1 ORDER BY id ASC LIMIT ?2
+            "#,
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map(params![after_id, limit], |row| {
+            Ok(HistoryPair {
+                id: row.get(0)?,
+                raw_text: row.get(1)?,
+                final_text: row.get(2)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+pub fn history_count_after(app: &tauri::AppHandle, after_id: i64) -> Result<i64, String> {
+    let db = conn(app)?;
+    db.query_row(
+        "SELECT COUNT(*) FROM history WHERE id > ?1",
+        [after_id],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+pub fn suggestions_pending_count(app: &tauri::AppHandle) -> Result<i64, String> {
+    let db = conn(app)?;
+    db.query_row(
+        "SELECT COUNT(*) FROM dict_suggestions WHERE status = 'pending'",
+        [],
+        |row| row.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// All (term, replacement) pairs ever suggested, regardless of status — the
+/// analyzer passes them to the model so dismissed pairs stay dismissed.
+pub fn suggestion_known_pairs(app: &tauri::AppHandle) -> Result<Vec<(String, String)>, String> {
+    let db = conn(app)?;
+    let mut stmt = db
+        .prepare("SELECT term, replacement FROM dict_suggestions")
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+        .map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    for row in rows {
+        out.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(out)
+}
+
+/// Insert a fresh suggestion or bump the counter of a matching pending one.
+/// Accepted/dismissed pairs are left untouched. Returns true when a new
+/// pending suggestion was created.
+pub fn suggestion_insert(
+    app: &tauri::AppHandle,
+    term: &str,
+    replacement: &str,
+    reason: Option<&str>,
+    evidence: Option<&str>,
+) -> Result<bool, String> {
+    let db = conn(app)?;
+    let existing: Option<(i64, String)> = db
+        .query_row(
+            "SELECT id, status FROM dict_suggestions WHERE term = ?1 AND replacement = ?2",
+            params![term, replacement],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .ok();
+    match existing {
+        Some((id, status)) => {
+            if status == "pending" {
+                db.execute(
+                    "UPDATE dict_suggestions SET occurrences = occurrences + 1 WHERE id = ?1",
+                    [id],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            Ok(false)
+        }
+        None => {
+            db.execute(
+                r#"
+                INSERT INTO dict_suggestions (created_at, term, replacement, reason, evidence)
+                VALUES (?1, ?2, ?3, ?4, ?5)
+                "#,
+                params![Utc::now().to_rfc3339(), term, replacement, reason, evidence],
+            )
+            .map_err(|e| e.to_string())?;
+            Ok(true)
+        }
+    }
 }
 
 #[tauri::command]

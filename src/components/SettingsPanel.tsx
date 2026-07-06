@@ -3,7 +3,7 @@ import { emit, listen } from "@tauri-apps/api/event";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { Keyboard, Pencil, Plus, Trash2 } from "lucide-react";
+import { Check, Keyboard, Pencil, Plus, Trash2, X } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -18,16 +18,25 @@ import {
   dictionaryUpsert,
   historyDelete,
   historyList,
+  insightsSummary,
+  learnRunNow,
+  learnStatus,
   requestAccessibility,
   saveSettings,
   getSettings,
+  suggestionAccept,
+  suggestionDismiss,
+  suggestionsList,
   usageSummary,
 } from "../lib/api";
 import type {
   AsrDownloadProgress,
   AsrStatus,
   DictionaryEntry,
+  DictSuggestion,
   HistoryEntry,
+  InsightsSummary,
+  LearnStatus,
   Settings,
   UsageSummary,
 } from "../lib/types";
@@ -35,6 +44,7 @@ import ModelSelect from "./ModelSelect";
 import Select from "./Select";
 
 export type SettingsSection =
+  | "insights"
   | "general"
   | "shortcuts"
   | "ai"
@@ -132,6 +142,7 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
 
   return (
     <div className="settings-pane">
+      {section === "insights" && <Insights />}
       {section === "general" && <General form={form} set={set} />}
       {section === "shortcuts" && <Shortcuts form={form} set={set} />}
       {section === "ai" && <AI form={form} set={set} />}
@@ -458,6 +469,12 @@ function AI({
           checked={form.smart_formatting}
           onChange={(smart_formatting) => set({ smart_formatting })}
         />
+        <SwitchRow
+          label="Lernvorschläge fürs Wörterbuch"
+          hint="Analysiert neue Diktate alle 4 Stunden im Hintergrund und schlägt Korrekturen im Wörterbuch vor."
+          checked={form.learning_enabled}
+          onChange={(learning_enabled) => set({ learning_enabled })}
+        />
       </Group>
 
       <Group title="Modell">
@@ -483,6 +500,138 @@ function AI({
         </Row>
       </Group>
     </>
+  );
+}
+
+function formatLastRun(iso: string | null) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toLocaleString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function Suggestions({ onAccepted }: { onAccepted: () => void }) {
+  const [suggestions, setSuggestions] = useState<DictSuggestion[]>([]);
+  const [status, setStatus] = useState<LearnStatus | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [message, setMessage] = useState("");
+
+  const refresh = () => {
+    suggestionsList().then(setSuggestions).catch(() => {});
+    learnStatus().then(setStatus).catch(() => {});
+  };
+
+  useEffect(() => {
+    refresh();
+    const un = listen("learn://suggestions", refresh);
+    return () => {
+      void un.then((f) => f());
+    };
+  }, []);
+
+  async function runNow() {
+    setAnalyzing(true);
+    setMessage("");
+    try {
+      const result = await learnRunNow();
+      setMessage(
+        result.skipped ??
+          (result.analyzed === 0
+            ? "Keine neuen Diktate seit der letzten Analyse."
+            : result.new_suggestions === 0
+              ? `${result.analyzed} Diktate analysiert – nichts Neues gefunden.`
+              : `${result.analyzed} Diktate analysiert, ${result.new_suggestions} ${result.new_suggestions === 1 ? "neuer Vorschlag" : "neue Vorschläge"}.`),
+      );
+    } catch (e) {
+      setMessage(String(e));
+    }
+    setAnalyzing(false);
+    refresh();
+  }
+
+  async function accept(suggestion: DictSuggestion) {
+    await suggestionAccept(suggestion.id).catch(() => {});
+    refresh();
+    onAccepted();
+  }
+
+  async function dismiss(suggestion: DictSuggestion) {
+    await suggestionDismiss(suggestion.id).catch(() => {});
+    refresh();
+  }
+
+  const lastRun = formatLastRun(status?.last_run_at ?? null);
+  const statusHint =
+    message ||
+    [
+      lastRun ? `Zuletzt analysiert: ${lastRun} Uhr` : "Noch nicht analysiert",
+      status && status.unanalyzed > 0
+        ? `${status.unanalyzed} ${status.unanalyzed === 1 ? "neues Diktat" : "neue Diktate"} in der Warteschlange`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+
+  return (
+    <Group title="Vorschläge">
+      <Row
+        label="Aus Diktaten lernen"
+        hint={statusHint || "Läuft automatisch alle 4 Stunden im Hintergrund."}
+      >
+        <button
+          type="button"
+          className="push"
+          disabled={analyzing || Boolean(status?.running)}
+          onClick={() => void runNow()}
+        >
+          {analyzing || status?.running ? "Analysiert…" : "Jetzt analysieren"}
+        </button>
+      </Row>
+      {suggestions.map((suggestion) => (
+        <div key={suggestion.id} className="row suggestion-row">
+          <div className="row-text">
+            <span className="row-label">
+              {suggestion.term}
+              <span className="dictionary-arrow"> → {suggestion.replacement}</span>
+              {suggestion.occurrences > 1 && (
+                <span className="suggestion-count">{suggestion.occurrences}×</span>
+              )}
+            </span>
+            {suggestion.reason && (
+              <span className="row-hint">{suggestion.reason}</span>
+            )}
+            {suggestion.evidence && (
+              <span className="row-hint suggestion-evidence">
+                „{suggestion.evidence}"
+              </span>
+            )}
+          </div>
+          <div className="row-ctl">
+            <button
+              type="button"
+              className="push primary"
+              onClick={() => void accept(suggestion)}
+            >
+              <Check size={13} />
+              Übernehmen
+            </button>
+            <button
+              type="button"
+              className="ghost"
+              aria-label="Vorschlag ablehnen"
+              onClick={() => void dismiss(suggestion)}
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      ))}
+    </Group>
   );
 }
 
@@ -553,6 +702,7 @@ function Dictionary() {
 
   return (
     <>
+      <Suggestions onAccepted={refresh} />
       <Group title="Neuer Eintrag">
         <div className="dictionary-form">
           <p className="dictionary-intro">
@@ -815,13 +965,124 @@ function UsageOverview({ reloadKey }: { reloadKey: number }) {
   );
 }
 
+function formatDurationMs(ms: number) {
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec} s`;
+  const totalMin = totalSec / 60;
+  if (totalMin < 60) return `${Math.round(totalMin)} min`;
+  const hours = Math.floor(totalMin / 60);
+  const minutes = Math.round(totalMin % 60);
+  return `${hours} h ${minutes} min`;
+}
+
+/** Average typing speed the "time saved" estimate is measured against. */
+const TYPING_WPM = 40;
+
+function Insights() {
+  const [range, setRange] = useState<RangeKey>("month");
+  const [date, setDate] = useState("");
+  const [summary, setSummary] = useState<InsightsSummary | null>(null);
+
+  useEffect(() => {
+    const { from, to } = rangeBounds(range, date);
+    insightsSummary(from, to).then(setSummary).catch(() => setSummary(null));
+  }, [range, date]);
+
+  const words = summary?.words ?? 0;
+  const durationMs = summary?.duration_ms ?? 0;
+  const minutes = durationMs / 60_000;
+  const wpm = minutes > 0 ? Math.round(words / minutes) : 0;
+  const savedMs = Math.max(0, (words / TYPING_WPM) * 60_000 - durationMs);
+  const maxAppWords = Math.max(
+    1,
+    ...(summary?.top_apps.map((entry) => entry.words) ?? [1]),
+  );
+
+  return (
+    <>
+      <Group title="Diktate">
+        <div className="usage-overview">
+          <div className="usage-filters">
+            {RANGE_PRESETS.map((preset) => (
+              <button
+                key={preset.key}
+                type="button"
+                className={`usage-pill${range === preset.key ? " active" : ""}`}
+                onClick={() => setRange(preset.key)}
+              >
+                {preset.label}
+              </button>
+            ))}
+            <input
+              type="date"
+              className={`usage-date${range === "date" ? " active" : ""}`}
+              value={date}
+              max={localDateStr(new Date())}
+              onChange={(e) => {
+                setDate(e.target.value);
+                setRange(e.target.value ? "date" : "month");
+              }}
+            />
+          </div>
+          <div className="usage-stats insights-stats">
+            <div className="usage-stat">
+              <span className="usage-stat-value">{fmtInt(summary?.count ?? 0)}</span>
+              <span className="usage-stat-label">Diktate</span>
+            </div>
+            <div className="usage-stat">
+              <span className="usage-stat-value">{fmtInt(words)}</span>
+              <span className="usage-stat-label">Wörter</span>
+            </div>
+            <div className="usage-stat">
+              <span className="usage-stat-value">{formatDurationMs(durationMs)}</span>
+              <span className="usage-stat-label">Sprechzeit</span>
+            </div>
+            <div className="usage-stat">
+              <span className="usage-stat-value">{wpm > 0 ? fmtInt(wpm) : "–"}</span>
+              <span className="usage-stat-label">Wörter/Min.</span>
+            </div>
+            <div className="usage-stat">
+              <span className="usage-stat-value">{formatDurationMs(savedMs)}</span>
+              <span className="usage-stat-label">Zeit gespart*</span>
+            </div>
+          </div>
+          <p className="insights-note">
+            *gegenüber Tippen mit {TYPING_WPM} Wörtern pro Minute.
+          </p>
+        </div>
+      </Group>
+      {summary && summary.top_apps.length > 0 && (
+        <Group title="Top-Apps">
+          {summary.top_apps.map((entry) => (
+            <div key={entry.app} className="row wide top-app-row">
+              <div className="top-app-head">
+                <span className="row-label">{entry.app}</span>
+                <span className="row-hint">
+                  {fmtInt(entry.words)} Wörter · {fmtInt(entry.count)}{" "}
+                  {entry.count === 1 ? "Diktat" : "Diktate"}
+                </span>
+              </div>
+              <div className="top-app-bar">
+                <span
+                  style={{
+                    width: `${Math.max(3, Math.round((entry.words / maxAppWords) * 100))}%`,
+                  }}
+                />
+              </div>
+            </div>
+          ))}
+        </Group>
+      )}
+      <UsageOverview reloadKey={0} />
+    </>
+  );
+}
+
 function History() {
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  const [reloadKey, setReloadKey] = useState(0);
   const refresh = () => {
     historyList(query, 160).then(setEntries).catch(() => {});
-    setReloadKey((k) => k + 1);
   };
 
   useEffect(() => {
@@ -832,7 +1093,6 @@ function History() {
 
   return (
     <>
-      <UsageOverview reloadKey={reloadKey} />
       <Group>
         <div className="row">
           <input
