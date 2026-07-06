@@ -150,6 +150,12 @@ async fn analyze_batch(
         Some(0.1),
     )
     .await?;
+    let _ = record_usage(
+        app,
+        "dictionary_learning",
+        &settings.postprocess_model,
+        &chat,
+    );
 
     let proposals = parse_suggestions(&chat.content)?;
     let mut candidates: Vec<ModelSuggestion> = Vec::new();
@@ -274,6 +280,7 @@ async fn verify_candidates(
     else {
         return Vec::new();
     };
+    let _ = record_usage(app, "dictionary_learning_safety", model, &chat);
     let trimmed = chat.content.trim().to_string();
     let inner = trimmed
         .strip_prefix("```json")
@@ -282,6 +289,29 @@ async fn verify_candidates(
         .unwrap_or(&trimmed)
         .trim();
     serde_json::from_str::<Vec<SafetyVerdict>>(inner).unwrap_or_default()
+}
+
+fn record_usage(
+    app: &tauri::AppHandle,
+    kind: &str,
+    fallback_model: &str,
+    chat: &openrouter::ChatResult,
+) -> Result<(), String> {
+    let model = chat
+        .model
+        .as_deref()
+        .filter(|m| !m.trim().is_empty())
+        .or_else(|| (!fallback_model.trim().is_empty()).then_some(fallback_model));
+    db::usage_event_insert(
+        app,
+        kind,
+        model,
+        chat.prompt_tokens,
+        chat.completion_tokens,
+        chat.reasoning_tokens,
+        chat.total_tokens,
+        chat.cost,
+    )
 }
 
 fn cap(text: &str) -> &str {

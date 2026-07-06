@@ -1174,7 +1174,32 @@ textarea {
 }
 
 .insights-stats {
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.insights-stats .usage-stat {
+  grid-column: span 2;
+}
+
+.insights-stats .usage-stat:nth-child(n + 4) {
+  grid-column: span 3;
+}
+
+@media (max-width: 720px) {
+  .insights-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .insights-stats .usage-stat,
+  .insights-stats .usage-stat:nth-child(n + 4) {
+    grid-column: auto;
+  }
+}
+
+@media (max-width: 380px) {
+  .insights-stats {
+    grid-template-columns: 1fr;
+  }
 }
 
 .insights-note {

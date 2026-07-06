@@ -1195,7 +1195,7 @@ function UsageOverview({ reloadKey }: { reloadKey: number }) {
         <div className="usage-stats">
           <div className="usage-stat">
             <span className="usage-stat-value">{formatUsd(summary?.cost ?? 0)}</span>
-            <span className="usage-stat-label">Kosten</span>
+            <span className="usage-stat-label">Gesamtkosten</span>
           </div>
           <div className="usage-stat">
             <span className="usage-stat-value">{fmtInt(summary?.post_processed_count ?? 0)}</span>

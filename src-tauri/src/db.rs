@@ -59,6 +59,19 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS ai_usage_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          model TEXT,
+          prompt_tokens INTEGER,
+          completion_tokens INTEGER,
+          reasoning_tokens INTEGER,
+          total_tokens INTEGER,
+          cost REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_ai_usage_events_created_at
+          ON ai_usage_events(created_at DESC);
         "#,
     )?;
     ensure_history_columns(&db)?;
@@ -305,10 +318,12 @@ pub struct UsageSummary {
     pub cost: f64,
 }
 
-/// Aggregate token usage and cost over an optional time window. `from`/`to` are
-/// RFC3339 timestamps (created_at is stored as RFC3339 UTC, so a lexical
-/// comparison is also chronological). A `None` bound is open-ended, so passing
-/// both as `None` yields the all-time total. `to` is exclusive.
+/// Aggregate token usage and cost over an optional time window. History rows
+/// cover per-dictation post-processing, while `ai_usage_events` covers
+/// background AI work such as dictionary learning. `from`/`to` are RFC3339
+/// timestamps (created_at is stored as RFC3339 UTC, so a lexical comparison is
+/// also chronological). A `None` bound is open-ended, so passing both as `None`
+/// yields the all-time total. `to` is exclusive.
 #[tauri::command]
 pub fn usage_summary(
     app: tauri::AppHandle,
@@ -316,8 +331,9 @@ pub fn usage_summary(
     to: Option<String>,
 ) -> Result<UsageSummary, String> {
     let db = conn(&app)?;
-    db.query_row(
-        r#"
+    let mut summary = db
+        .query_row(
+            r#"
         SELECT
           COUNT(*),
           COALESCE(SUM(post_processed), 0),
@@ -330,20 +346,94 @@ pub fn usage_summary(
         WHERE (?1 IS NULL OR created_at >= ?1)
           AND (?2 IS NULL OR created_at < ?2)
         "#,
-        params![from, to],
-        |row| {
-            Ok(UsageSummary {
-                count: row.get(0)?,
-                post_processed_count: row.get(1)?,
-                prompt_tokens: row.get(2)?,
-                completion_tokens: row.get(3)?,
-                reasoning_tokens: row.get(4)?,
-                total_tokens: row.get(5)?,
-                cost: row.get(6)?,
-            })
-        },
+            params![from.as_deref(), to.as_deref()],
+            |row| {
+                Ok(UsageSummary {
+                    count: row.get(0)?,
+                    post_processed_count: row.get(1)?,
+                    prompt_tokens: row.get(2)?,
+                    completion_tokens: row.get(3)?,
+                    reasoning_tokens: row.get(4)?,
+                    total_tokens: row.get(5)?,
+                    cost: row.get(6)?,
+                })
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+    let event_usage: (i64, i64, i64, i64, f64) = db
+        .query_row(
+            r#"
+            SELECT
+              COALESCE(SUM(prompt_tokens), 0),
+              COALESCE(SUM(completion_tokens), 0),
+              COALESCE(SUM(reasoning_tokens), 0),
+              COALESCE(SUM(total_tokens), 0),
+              COALESCE(SUM(cost), 0)
+            FROM ai_usage_events
+            WHERE (?1 IS NULL OR created_at >= ?1)
+              AND (?2 IS NULL OR created_at < ?2)
+            "#,
+            params![from.as_deref(), to.as_deref()],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+    summary.prompt_tokens += event_usage.0;
+    summary.completion_tokens += event_usage.1;
+    summary.reasoning_tokens += event_usage.2;
+    summary.total_tokens += event_usage.3;
+    summary.cost += event_usage.4;
+    Ok(summary)
+}
+
+pub fn usage_event_insert(
+    app: &tauri::AppHandle,
+    kind: &str,
+    model: Option<&str>,
+    prompt_tokens: Option<i64>,
+    completion_tokens: Option<i64>,
+    reasoning_tokens: Option<i64>,
+    total_tokens: Option<i64>,
+    cost: Option<f64>,
+) -> Result<(), String> {
+    let has_usage = prompt_tokens.is_some()
+        || completion_tokens.is_some()
+        || reasoning_tokens.is_some()
+        || total_tokens.is_some()
+        || cost.is_some();
+    if !has_usage {
+        return Ok(());
+    }
+    let db = conn(app)?;
+    db.execute(
+        r#"
+        INSERT INTO ai_usage_events (
+          created_at, kind, model, prompt_tokens, completion_tokens,
+          reasoning_tokens, total_tokens, cost
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+        "#,
+        params![
+            Utc::now().to_rfc3339(),
+            kind,
+            model,
+            prompt_tokens,
+            completion_tokens,
+            reasoning_tokens,
+            total_tokens,
+            cost
+        ],
     )
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    Ok(())
 }
 
 #[derive(Serialize, Deserialize, Clone)]
