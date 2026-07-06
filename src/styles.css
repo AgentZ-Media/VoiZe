@@ -1162,6 +1162,58 @@ textarea {
   }
 }
 
+.insights-stats {
+  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+}
+
+.insights-note {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ink-muted);
+}
+
+.top-app-row {
+  gap: 6px;
+}
+
+.top-app-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.top-app-bar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  overflow: hidden;
+}
+
+.top-app-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: color-mix(in oklch, var(--primary) 70%, transparent);
+}
+
+.suggestion-row {
+  align-items: flex-start;
+}
+
+.suggestion-count {
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  background: color-mix(in oklch, var(--primary) 22%, transparent);
+  color: var(--ink);
+}
+
+.suggestion-evidence {
+  font-style: italic;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

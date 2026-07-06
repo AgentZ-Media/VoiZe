@@ -22,6 +22,7 @@ pub struct Settings {
     pub smart_formatting: bool,
     pub asr_model_ready: bool,
     pub custom_instructions: String,
+    pub learning_enabled: bool,
 }
 
 impl Default for Settings {
@@ -41,6 +42,7 @@ impl Default for Settings {
             smart_formatting: true,
             asr_model_ready: false,
             custom_instructions: String::new(),
+            learning_enabled: true,
         }
     }
 }

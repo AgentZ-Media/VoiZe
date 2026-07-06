@@ -2,6 +2,7 @@ mod asr;
 mod context;
 mod db;
 mod fs_util;
+mod learn;
 mod native;
 mod openrouter;
 mod settings;
@@ -34,6 +35,7 @@ pub fn run() {
 
             db::init(app.handle())?;
             tray::setup(app.handle())?;
+            learn::spawn_scheduler(app.handle().clone());
 
             #[cfg(target_os = "macos")]
             if let Some(win) = app.get_webview_window("settings") {
@@ -74,10 +76,16 @@ pub fn run() {
             db::history_list,
             db::history_delete,
             db::usage_summary,
+            db::insights_summary,
             db::dictionary_list,
             db::dictionary_upsert,
             db::dictionary_delete,
             db::dictionary_replace_all,
+            db::suggestions_list,
+            db::suggestion_accept,
+            db::suggestion_dismiss,
+            learn::learn_run_now,
+            learn::learn_status,
             native::activation_start,
             native::activation_stop,
             native::accessibility_status,
