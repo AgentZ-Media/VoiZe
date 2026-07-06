@@ -756,7 +756,20 @@ function History() {
                   </button>
                 </div>
               </header>
-              <p>{entry.final_text}</p>
+              {entry.post_processed && entry.raw_text.trim() !== entry.final_text.trim() ? (
+                <div className="history-versions">
+                  <div className="history-version">
+                    <span className="row-hint">Original</span>
+                    <p className="history-raw">{entry.raw_text}</p>
+                  </div>
+                  <div className="history-version">
+                    <span className="row-hint">KI</span>
+                    <p>{entry.final_text}</p>
+                  </div>
+                </div>
+              ) : (
+                <p>{entry.final_text}</p>
+              )}
             </div>
           ))}
         </Group>

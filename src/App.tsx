@@ -96,8 +96,13 @@ function buildPolishMessages(
         "Return only the final text. Do not explain. Do not wrap in quotes.",
         "Preserve meaning, language, names, numbers, code-like tokens, and the user's voice.",
         settings.smart_formatting
-          ? "Add punctuation, paragraphs, bullets, and list structure when the spoken text clearly implies it."
-          : "Only fix obvious transcription errors and punctuation.",
+          ? [
+              "Add punctuation and structure the result for readability using real newline characters (not the literal characters backslash-n).",
+              "Separate distinct thoughts into paragraphs with a blank line between them.",
+              "When the user enumerates things, dictates a list, or says cues like 'erstens/zweitens', 'first/second', 'point one', 'next', put each item on its own line. Use '- ' for unordered items and '1.', '2.', '3.' for items the user explicitly numbers.",
+              "Keep single short utterances as a single line — do not invent structure that was not spoken.",
+            ].join(" ")
+          : "Only fix obvious transcription errors and punctuation. Keep the original line structure.",
         "Remove filler words and self-corrections when they are clearly not intended.",
         app ? `Current app/window context: ${app}.` : "",
         dictionaryText ? `Personal dictionary:\n${dictionaryText}` : "",

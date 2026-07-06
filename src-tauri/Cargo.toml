@@ -1,6 +1,6 @@
 [package]
 name = "voize"
-version = "0.1.4"
+version = "0.1.5"
 description = "VoiZe - local-first macOS dictation"
 authors = ["AgentZ Media"]
 edition = "2021"

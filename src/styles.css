@@ -1055,6 +1055,24 @@ textarea {
   font-size: 12.5px;
   user-select: text;
   text-wrap: pretty;
+  white-space: pre-wrap;
+}
+
+.history-versions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.history-version {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.history-row .history-raw {
+  color: var(--muted, var(--ink));
+  opacity: 0.72;
 }
 
 @media (prefers-reduced-motion: reduce) {
