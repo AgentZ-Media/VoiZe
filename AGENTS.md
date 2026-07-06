@@ -29,6 +29,11 @@ VoiZe is a Tauri 2 macOS menu-bar dictation app. It records locally, transcribes
 - Tauri bundle: `npm run tauri build`
 - Rust check: `cd src-tauri && cargo check`
 
+## Release Management
+
+- Every GitHub release must include meaningful release notes. Keep them concise, but describe the user-visible changes, important fixes, and any update or permission caveats instead of using a generic placeholder.
+- When preparing a release, update the GitHub release body for that tag so the in-app Über → Release Notes view can show useful history.
+
 ## Design Notes
 
 Use product UI density. Avoid landing-page patterns, decorative gradients, and nested cards. Every visible state should help the user speak, review, insert, or recover dictation.

@@ -4,6 +4,7 @@ import {
   BarChart3,
   Bot,
   Clock3,
+  Info,
   Keyboard,
   Library,
   Settings,
@@ -23,6 +24,7 @@ const NAV: { id: SettingsSection; label: string; icon: ComponentType<{ size?: nu
   { id: "dictionary", label: "Wörterbuch", icon: Library },
   { id: "history", label: "Verlauf", icon: Clock3 },
   { id: "diagnostics", label: "Diagnose", icon: Wrench },
+  { id: "about", label: "Über", icon: Info },
 ];
 
 export default function SettingsApp() {

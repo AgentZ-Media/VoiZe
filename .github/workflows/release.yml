@@ -90,7 +90,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: "VoiZe ${{ github.ref_name }}"
-          releaseBody: "VoiZe desktop release."
+          releaseBody: ${{ github.event.head_commit.message }}
           releaseDraft: false
           prerelease: false
           uploadUpdaterJson: true

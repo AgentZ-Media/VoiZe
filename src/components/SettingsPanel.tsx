@@ -1,9 +1,10 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { emit, listen } from "@tauri-apps/api/event";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
-import { Check, Keyboard, Pencil, Plus, Trash2, X } from "lucide-react";
+import { Check, ExternalLink, Keyboard, Pencil, Plus, RefreshCw, Trash2, X } from "lucide-react";
 import type { KeyboardEvent, ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -50,7 +51,8 @@ export type SettingsSection =
   | "ai"
   | "dictionary"
   | "history"
-  | "diagnostics";
+  | "diagnostics"
+  | "about";
 
 interface Props {
   section: SettingsSection;
@@ -149,6 +151,7 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
       {section === "dictionary" && <Dictionary />}
       {section === "history" && <History />}
       {section === "diagnostics" && <Diagnostics />}
+      {section === "about" && <About form={form} set={set} />}
       <div className={`autosave ${saved ? "visible" : ""}`}>Gespeichert</div>
     </div>
   );
@@ -162,16 +165,9 @@ function General({
   set: (patch: Partial<Settings>) => void;
 }) {
   const [autostart, setAutostart] = useState<boolean | null>(null);
-  const [update, setUpdate] = useState<Update | null>(null);
-  const [updateStatus, setUpdateStatus] = useState("");
-  const [installing, setInstalling] = useState(false);
-  const [version, setVersion] = useState("");
-  // download progress 0..1, or null while indeterminate (server sent no length)
-  const [progress, setProgress] = useState<number | null>(null);
 
   useEffect(() => {
     isEnabled().then(setAutostart).catch(() => setAutostart(null));
-    getVersion().then(setVersion).catch(() => {});
   }, []);
 
   async function toggleAutostart(next: boolean) {
@@ -183,6 +179,183 @@ function General({
       setAutostart(null);
     }
   }
+
+  return (
+    <>
+      <Group title="Ausgabe">
+        <Row
+          label="Fertiger Text"
+          hint="Direkt einfügen tippt den Text an der Cursorposition ein."
+        >
+          <Select
+            ariaLabel="Fertiger Text"
+            value={form.output_mode}
+            onChange={(output_mode) =>
+              set({ output_mode: output_mode as Settings["output_mode"] })
+            }
+            options={[
+              { value: "insert", label: "Direkt einfügen" },
+              { value: "clipboard", label: "Zwischenablage" },
+            ]}
+          />
+        </Row>
+        <SwitchRow
+          label="Zwischenablage wiederherstellen"
+          hint="Nach dem Einfügen wird der vorherige Inhalt zurückgelegt."
+          checked={form.restore_clipboard}
+          onChange={(restore_clipboard) => set({ restore_clipboard })}
+        />
+      </Group>
+
+      <Group title="Verhalten">
+        <SwitchRow
+          label="Aktivierungssound"
+          checked={form.start_sound_enabled}
+          onChange={(start_sound_enabled) => set({ start_sound_enabled })}
+        />
+        <SwitchRow
+          label="Abschlusssound"
+          checked={form.finish_sound_enabled}
+          onChange={(finish_sound_enabled) => set({ finish_sound_enabled })}
+        />
+        <SwitchRow
+          label="Bei Anmeldung öffnen"
+          hint={autostart === null ? "Im Entwicklungsmodus eventuell nicht verfügbar." : undefined}
+          checked={Boolean(autostart)}
+          onChange={(v) => void toggleAutostart(v)}
+        />
+      </Group>
+    </>
+  );
+}
+
+interface GitHubRelease {
+  id: number;
+  tag_name: string;
+  name: string | null;
+  body: string | null;
+  html_url: string;
+  published_at: string | null;
+  prerelease: boolean;
+}
+
+const RELEASES_URL = "https://api.github.com/repos/AgentZ-Media/VoiZe/releases?per_page=100";
+const RELEASES_CACHE_KEY = "voize.releaseNotes.v1";
+
+function releaseVersion(tag: string) {
+  return tag.replace(/^v/i, "");
+}
+
+function formatReleaseDate(iso: string | null) {
+  if (!iso) return "Unveröffentlicht";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "Unveröffentlicht";
+  return date.toLocaleDateString("de-DE", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
+
+function cleanReleaseLine(line: string) {
+  return line
+    .replace(/^#{1,6}\s*/, "")
+    .replace(/^[-*]\s+\[[ x]\]\s+/i, "• ")
+    .replace(/^[-*]\s+/, "• ")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .trim();
+}
+
+function releaseNotes(body: string | null) {
+  if (!body?.trim()) return [];
+  return body
+    .split("\n")
+    .map(cleanReleaseLine)
+    .filter((line) => line && !/^<!--/.test(line));
+}
+
+function readCachedReleases() {
+  try {
+    const raw = window.localStorage.getItem(RELEASES_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as GitHubRelease[];
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function cacheReleases(releases: GitHubRelease[]) {
+  try {
+    window.localStorage.setItem(RELEASES_CACHE_KEY, JSON.stringify(releases));
+  } catch {
+    // localStorage is a convenience cache only.
+  }
+}
+
+async function fetchAllReleases() {
+  const releases: GitHubRelease[] = [];
+  for (let page = 1; ; page += 1) {
+    const response = await fetch(`${RELEASES_URL}&page=${page}`, {
+      headers: { Accept: "application/vnd.github+json" },
+    });
+    if (!response.ok) throw new Error(`GitHub antwortet mit ${response.status}.`);
+    const data = (await response.json()) as GitHubRelease[];
+    if (!Array.isArray(data)) throw new Error("GitHub hat keine Release-Liste gesendet.");
+    releases.push(...data);
+    if (data.length < 100) break;
+  }
+  return releases;
+}
+
+function About({
+  form,
+  set,
+}: {
+  form: Settings;
+  set: (patch: Partial<Settings>) => void;
+}) {
+  const [version, setVersion] = useState("");
+  const [releases, setReleases] = useState<GitHubRelease[]>(() => readCachedReleases() ?? []);
+  const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState("");
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updateStatus, setUpdateStatus] = useState("");
+  const [installing, setInstalling] = useState(false);
+  // download progress 0..1, or null while indeterminate (server sent no length)
+  const [progress, setProgress] = useState<number | null>(null);
+
+  async function loadReleases(silent = false) {
+    if (!silent) setStatus("");
+    setLoading(true);
+    try {
+      const data = await fetchAllReleases();
+      const published = data.filter((release) => !release.prerelease || release.published_at);
+      setReleases(published);
+      cacheReleases(published);
+      setStatus(
+        published.length > 0
+          ? `${published.length} ${published.length === 1 ? "Release" : "Releases"} geladen.`
+          : "Noch keine GitHub-Releases veröffentlicht.",
+      );
+    } catch (e) {
+      setStatus(
+        releases.length > 0
+          ? "Offline oder GitHub nicht erreichbar. Zeige zuletzt geladene Release Notes."
+          : String(e),
+      );
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+    void loadReleases(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function checkUpdate() {
     setUpdateStatus("Prüfe Updates…");
@@ -228,63 +401,60 @@ function General({
     }
   }
 
+  const normalizedVersion = releaseVersion(version);
+  const latest = releases[0] ?? null;
+  const current = releases.find(
+    (release) => releaseVersion(release.tag_name) === normalizedVersion,
+  );
   const percent = progress != null ? Math.round(progress * 100) : null;
 
   return (
     <>
-      <Group title="Ausgabe">
-        <Row
-          label="Fertiger Text"
-          hint="Direkt einfügen tippt den Text an der Cursorposition ein."
-        >
-          <Select
-            ariaLabel="Fertiger Text"
-            value={form.output_mode}
-            onChange={(output_mode) =>
-              set({ output_mode: output_mode as Settings["output_mode"] })
-            }
-            options={[
-              { value: "insert", label: "Direkt einfügen" },
-              { value: "clipboard", label: "Zwischenablage" },
-            ]}
-          />
+      <Group title="VoiZe">
+        <Row label="Aktuelle Version" hint="Installierte App-Version aus Tauri.">
+          <span className="version-tag">{version ? `v${version}` : "…"}</span>
         </Row>
-        <SwitchRow
-          label="Zwischenablage wiederherstellen"
-          hint="Nach dem Einfügen wird der vorherige Inhalt zurückgelegt."
-          checked={form.restore_clipboard}
-          onChange={(restore_clipboard) => set({ restore_clipboard })}
-        />
+        <Row
+          label="Neueste Veröffentlichung"
+          hint={
+            latest
+              ? `${latest.tag_name} · ${formatReleaseDate(latest.published_at)}`
+              : status || "Wird von GitHub geladen."
+          }
+        >
+          <div className="btn-row">
+            <button
+              type="button"
+              className="push square"
+              aria-label="Release Notes neu laden"
+              onClick={() => void loadReleases()}
+              disabled={loading}
+            >
+              <RefreshCw size={13} />
+            </button>
+            <button
+              type="button"
+              className="push"
+              onClick={() => void openUrl("https://github.com/AgentZ-Media/VoiZe/releases")}
+            >
+              <ExternalLink size={13} />
+              GitHub
+            </button>
+          </div>
+        </Row>
+        {status && (
+          <div className="row wide">
+            <span className="row-hint">{loading ? "Lädt Release Notes…" : status}</span>
+          </div>
+        )}
       </Group>
 
-      <Group title="Verhalten">
-        <SwitchRow
-          label="Aktivierungssound"
-          checked={form.start_sound_enabled}
-          onChange={(start_sound_enabled) => set({ start_sound_enabled })}
-        />
-        <SwitchRow
-          label="Abschlusssound"
-          checked={form.finish_sound_enabled}
-          onChange={(finish_sound_enabled) => set({ finish_sound_enabled })}
-        />
+      <Group title="Updates">
         <SwitchRow
           label="Beim Start nach Updates suchen"
           checked={form.auto_update_on_launch}
           onChange={(auto_update_on_launch) => set({ auto_update_on_launch })}
         />
-        <SwitchRow
-          label="Bei Anmeldung öffnen"
-          hint={autostart === null ? "Im Entwicklungsmodus eventuell nicht verfügbar." : undefined}
-          checked={Boolean(autostart)}
-          onChange={(v) => void toggleAutostart(v)}
-        />
-      </Group>
-
-      <Group title="Updates">
-        <Row label="Aktuelle Version">
-          <span className="version-tag">{version ? `v${version}` : "…"}</span>
-        </Row>
         <Row label="Softwareupdate" hint={updateStatus || "Sucht nach neuen Versionen auf GitHub."}>
           <div className="btn-row">
             <button
@@ -323,6 +493,62 @@ function General({
               />
             </div>
           </Row>
+        )}
+      </Group>
+
+      <Group title="Release Notes">
+        {releases.length === 0 ? (
+          <div className="release-empty">
+            {loading ? "Release Notes werden geladen…" : "Noch keine Release Notes gefunden."}
+          </div>
+        ) : (
+          releases.map((release) => {
+            const notes = releaseNotes(release.body);
+            const visibleNotes = notes.slice(0, 24);
+            const isCurrent = current?.id === release.id;
+            return (
+              <article key={release.id} className="release-row">
+                <header className="release-head">
+                  <div>
+                    <h4>{release.name || release.tag_name}</h4>
+                    <span>
+                      {release.tag_name} · {formatReleaseDate(release.published_at)}
+                    </span>
+                  </div>
+                  <div className="release-actions">
+                    {isCurrent && <span className="status-pill ok">Installiert</span>}
+                    {release.prerelease && <span className="status-pill warn">Vorab</span>}
+                    <button
+                      type="button"
+                      className="ghost"
+                      aria-label={`${release.tag_name} auf GitHub öffnen`}
+                      onClick={() => void openUrl(release.html_url)}
+                    >
+                      <ExternalLink size={13} />
+                    </button>
+                  </div>
+                </header>
+                {visibleNotes.length > 0 ? (
+                  <ul className="release-notes">
+                    {visibleNotes.map((line, index) => (
+                      <li key={`${release.id}-${index}`}>{line.replace(/^•\s*/, "")}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="release-fallback">Keine Notizen für dieses Release.</p>
+                )}
+                {notes.length > visibleNotes.length && (
+                  <button
+                    type="button"
+                    className="release-more"
+                    onClick={() => void openUrl(release.html_url)}
+                  >
+                    Vollständige Notizen auf GitHub öffnen
+                  </button>
+                )}
+              </article>
+            );
+          })
         )}
       </Group>
     </>
