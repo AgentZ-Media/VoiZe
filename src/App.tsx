@@ -43,6 +43,10 @@ type PendingAction = "none" | "stop" | "cancel";
 const currentWindow = getCurrentWindow();
 const MIN_RECORD_MS = 250;
 
+function countWords(text: string) {
+  return text.match(/[\p{L}\p{N}]+(?:[’'-][\p{L}\p{N}]+)*/gu)?.length ?? 0;
+}
+
 function toAccelerator(hotkey: string) {
   if (/fn/i.test(hotkey)) return null;
   const parts = hotkey.split("+").map((part) => part.trim()).filter(Boolean);
@@ -93,7 +97,6 @@ function buildPolishMessages(
         "Formatierung:",
         "- Trenne klar getrennte Gedanken durch eine Leerzeile (echte Zeilenumbrüche, nicht die Zeichenfolge Backslash-n).",
         "- Wenn der Sprecher ausdrücklich aufzählt ('erstens/zweitens', 'Punkt eins', 'nächster Punkt'), setze jeden Punkt in eine eigene Zeile: '- ' für ungeordnete Punkte, '1.', '2.', '3.' nur bei ausdrücklich nummerierten.",
-        "- Kurze Diktate bleiben eine einzige Zeile. Erfinde keine Struktur, die nicht gesprochen wurde.",
       ].join("\n")
     : "Formatierung: Behalte die ursprüngliche Zeilenstruktur bei.";
   const sections = [
@@ -407,8 +410,16 @@ export default function App() {
       let finalText = applyDictionary(asr.text, dictionary);
       let postProcessed = false;
       let usage: ChatResult | null = null;
+      const minPostprocessWords = Math.min(
+        200,
+        Math.max(0, activeSettings.postprocess_min_words ?? 35),
+      );
+      const shouldPostprocess =
+        activeSettings.postprocess_enabled &&
+        Boolean(activeSettings.openrouter_api_key.trim()) &&
+        (minPostprocessWords === 0 || countWords(finalText) >= minPostprocessWords);
 
-      if (activeSettings.postprocess_enabled && activeSettings.openrouter_api_key.trim()) {
+      if (shouldPostprocess) {
         setCaption("Formatiert mit KI");
         setState("polishing");
         try {

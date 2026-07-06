@@ -1,6 +1,7 @@
 export interface Settings {
   openrouter_api_key: string;
   postprocess_enabled: boolean;
+  postprocess_min_words: number;
   postprocess_model: string;
   hotkey: string;
   hands_free_hotkey: string;

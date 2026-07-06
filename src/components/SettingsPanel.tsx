@@ -440,6 +440,14 @@ function AI({
   form: Settings;
   set: (patch: Partial<Settings>) => void;
 }) {
+  const setMinWords = (value: string) => {
+    const parsed = Number.parseInt(value, 10);
+    const postprocess_min_words = Number.isFinite(parsed)
+      ? Math.max(0, Math.min(200, parsed))
+      : 0;
+    set({ postprocess_min_words });
+  };
+
   return (
     <>
       <Group title="OpenRouter">
@@ -457,6 +465,22 @@ function AI({
           checked={form.postprocess_enabled}
           onChange={(postprocess_enabled) => set({ postprocess_enabled })}
         />
+        <Row
+          label="Nachbearbeitung ab"
+          hint="Standard: 35 Wörter. 0 bedeutet: auch kurze Diktate mit KI nachbearbeiten."
+        >
+          <input
+            type="number"
+            min={0}
+            max={200}
+            step={5}
+            value={form.postprocess_min_words}
+            disabled={!form.postprocess_enabled}
+            aria-label="Mindestanzahl Wörter für KI-Nachbearbeitung"
+            onChange={(e) => setMinWords(e.target.value)}
+          />
+          <span className="unit-label">Wörter</span>
+        </Row>
         <SwitchRow
           label="App-Kontext nutzen"
           hint="Die fokussierte App fließt als Kontext in die Formatierung ein."

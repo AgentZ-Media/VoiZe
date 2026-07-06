@@ -10,6 +10,7 @@ use crate::fs_util::write_private;
 pub struct Settings {
     pub openrouter_api_key: String,
     pub postprocess_enabled: bool,
+    pub postprocess_min_words: u32,
     pub postprocess_model: String,
     pub hotkey: String,
     pub hands_free_hotkey: String,
@@ -30,6 +31,7 @@ impl Default for Settings {
         Self {
             openrouter_api_key: String::new(),
             postprocess_enabled: true,
+            postprocess_min_words: 35,
             postprocess_model: "google/gemini-3.1-flash-lite".into(),
             hotkey: "Fn".into(),
             hands_free_hotkey: "Fn+Space".into(),
@@ -57,6 +59,7 @@ fn normalize(settings: &mut Settings) {
     if settings.postprocess_model.trim().is_empty() {
         settings.postprocess_model = "google/gemini-3.1-flash-lite".into();
     }
+    settings.postprocess_min_words = settings.postprocess_min_words.min(200);
     if settings.hotkey.trim().is_empty() {
         settings.hotkey = "Fn".into();
     }

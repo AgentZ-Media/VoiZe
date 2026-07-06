@@ -453,6 +453,12 @@ textarea {
   width: 200px;
 }
 
+.unit-label {
+  color: var(--ink-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .row.wide input[type="text"],
 .row.wide select,
 .row.wide textarea {
