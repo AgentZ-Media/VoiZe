@@ -224,7 +224,8 @@ pub fn history_list(
                 r#"
                 SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                        final_text, delivery_mode, model, post_processed, duration_ms,
-                       dictionary_snapshot
+                       dictionary_snapshot, prompt_tokens, completion_tokens,
+                       reasoning_tokens, total_tokens, cost
                 FROM history
                 WHERE raw_text LIKE ?1 OR final_text LIKE ?1 OR focused_app LIKE ?1
                 ORDER BY created_at DESC
@@ -244,7 +245,8 @@ pub fn history_list(
                 r#"
                 SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                        final_text, delivery_mode, model, post_processed, duration_ms,
-                       dictionary_snapshot
+                       dictionary_snapshot, prompt_tokens, completion_tokens,
+                       reasoning_tokens, total_tokens, cost
                 FROM history
                 ORDER BY created_at DESC
                 LIMIT ?1
