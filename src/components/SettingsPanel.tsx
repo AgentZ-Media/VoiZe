@@ -21,6 +21,7 @@ import {
   requestAccessibility,
   saveSettings,
   getSettings,
+  usageSummary,
 } from "../lib/api";
 import type {
   AsrDownloadProgress,
@@ -28,6 +29,7 @@ import type {
   DictionaryEntry,
   HistoryEntry,
   Settings,
+  UsageSummary,
 } from "../lib/types";
 import ModelSelect from "./ModelSelect";
 import Select from "./Select";
@@ -705,10 +707,122 @@ function Dictionary() {
   );
 }
 
+type RangeKey = "today" | "week" | "month" | "all" | "date";
+
+function localDateStr(d: Date) {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** Local-time window → UTC ISO bounds that match the RFC3339 `created_at`. */
+function rangeBounds(key: RangeKey, dateStr: string): { from: string | null; to: string | null } {
+  const now = new Date();
+  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  switch (key) {
+    case "all":
+      return { from: null, to: null };
+    case "today":
+      return { from: startOfDay.toISOString(), to: null };
+    case "week": {
+      const monday = new Date(startOfDay);
+      monday.setDate(monday.getDate() - ((startOfDay.getDay() + 6) % 7));
+      return { from: monday.toISOString(), to: null };
+    }
+    case "month":
+      return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to: null };
+    case "date": {
+      if (!dateStr) return { from: null, to: null };
+      const [y, m, d] = dateStr.split("-").map(Number);
+      return {
+        from: new Date(y, m - 1, d).toISOString(),
+        to: new Date(y, m - 1, d + 1).toISOString(),
+      };
+    }
+  }
+}
+
+function formatUsd(usd: number) {
+  if (!usd || usd <= 0) return "$0.00";
+  if (usd < 0.0001) return "<$0.0001";
+  if (usd < 1) return `$${usd.toFixed(4)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+const fmtInt = (n: number) => n.toLocaleString("de-DE");
+
+const RANGE_PRESETS: { key: RangeKey; label: string }[] = [
+  { key: "today", label: "Heute" },
+  { key: "week", label: "Woche" },
+  { key: "month", label: "Monat" },
+  { key: "all", label: "Gesamt" },
+];
+
+function UsageOverview({ reloadKey }: { reloadKey: number }) {
+  const [range, setRange] = useState<RangeKey>("month");
+  const [date, setDate] = useState("");
+  const [summary, setSummary] = useState<UsageSummary | null>(null);
+
+  useEffect(() => {
+    const { from, to } = rangeBounds(range, date);
+    usageSummary(from, to).then(setSummary).catch(() => setSummary(null));
+  }, [range, date, reloadKey]);
+
+  return (
+    <Group title="Kosten & Nutzung">
+      <div className="usage-overview">
+        <div className="usage-filters">
+          {RANGE_PRESETS.map((preset) => (
+            <button
+              key={preset.key}
+              type="button"
+              className={`usage-pill${range === preset.key ? " active" : ""}`}
+              onClick={() => setRange(preset.key)}
+            >
+              {preset.label}
+            </button>
+          ))}
+          <input
+            type="date"
+            className={`usage-date${range === "date" ? " active" : ""}`}
+            value={date}
+            max={localDateStr(new Date())}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setRange(e.target.value ? "date" : "month");
+            }}
+          />
+        </div>
+        <div className="usage-stats">
+          <div className="usage-stat">
+            <span className="usage-stat-value">{formatUsd(summary?.cost ?? 0)}</span>
+            <span className="usage-stat-label">Kosten</span>
+          </div>
+          <div className="usage-stat">
+            <span className="usage-stat-value">{fmtInt(summary?.post_processed_count ?? 0)}</span>
+            <span className="usage-stat-label">KI-Diktate</span>
+          </div>
+          <div className="usage-stat">
+            <span className="usage-stat-value">{fmtInt(summary?.prompt_tokens ?? 0)}</span>
+            <span className="usage-stat-label">Input-Tokens</span>
+          </div>
+          <div className="usage-stat">
+            <span className="usage-stat-value">{fmtInt(summary?.completion_tokens ?? 0)}</span>
+            <span className="usage-stat-label">Output-Tokens</span>
+          </div>
+        </div>
+      </div>
+    </Group>
+  );
+}
+
 function History() {
   const [query, setQuery] = useState("");
   const [entries, setEntries] = useState<HistoryEntry[]>([]);
-  const refresh = () => historyList(query, 160).then(setEntries).catch(() => {});
+  const [reloadKey, setReloadKey] = useState(0);
+  const refresh = () => {
+    historyList(query, 160).then(setEntries).catch(() => {});
+    setReloadKey((k) => k + 1);
+  };
 
   useEffect(() => {
     const t = window.setTimeout(refresh, 180);
@@ -718,6 +832,7 @@ function History() {
 
   return (
     <>
+      <UsageOverview reloadKey={reloadKey} />
       <Group>
         <div className="row">
           <input
@@ -737,6 +852,7 @@ function History() {
                   {new Date(entry.created_at).toLocaleString()} ·{" "}
                   {entry.focused_app || "Unbekannte App"} ·{" "}
                   {entry.post_processed ? "KI formatiert" : "Lokal"}
+                  {entry.cost != null ? ` · ${formatUsd(entry.cost)}` : ""}
                 </span>
                 <div className="btn-row">
                   <button

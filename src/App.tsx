@@ -23,7 +23,7 @@ import {
   transcribeAudio,
 } from "./lib/api";
 import { VoiceRecorder } from "./lib/recorder";
-import type { DictionaryEntry, ScreenContext, Settings } from "./lib/types";
+import type { ChatResult, DictionaryEntry, ScreenContext, Settings } from "./lib/types";
 
 type HudState =
   | "idle"
@@ -381,16 +381,19 @@ export default function App() {
       const dictionary = await dictionaryList().catch(() => []);
       let finalText = applyDictionary(asr.text, dictionary);
       let postProcessed = false;
+      let usage: ChatResult | null = null;
 
       if (activeSettings.postprocess_enabled && activeSettings.openrouter_api_key.trim()) {
         setCaption("Formatiert mit KI");
         setState("polishing");
         try {
-          finalText = await openrouterChat(
+          const chat = await openrouterChat(
             activeSettings.postprocess_model,
             buildPolishMessages(finalText, activeContext, dictionary, activeSettings),
             0.15,
           );
+          finalText = chat.content;
+          usage = chat;
           postProcessed = true;
         } catch {
           // network/API failure must never cost the dictation — deliver
@@ -426,6 +429,11 @@ export default function App() {
         post_processed: postProcessed,
         duration_ms: recording.durationMs,
         dictionary_snapshot: JSON.stringify(dictionary),
+        prompt_tokens: usage?.prompt_tokens ?? null,
+        completion_tokens: usage?.completion_tokens ?? null,
+        reasoning_tokens: usage?.reasoning_tokens ?? null,
+        total_tokens: usage?.total_tokens ?? null,
+        cost: usage?.cost ?? null,
       }).catch(() => {});
       setCaption(
         delivery === "insert"

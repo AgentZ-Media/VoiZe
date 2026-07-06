@@ -36,6 +36,11 @@ export interface HistoryEntry {
   post_processed: boolean;
   duration_ms: number | null;
   dictionary_snapshot: string;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+  cost: number | null;
 }
 
 export interface NewHistoryEntry {
@@ -49,6 +54,33 @@ export interface NewHistoryEntry {
   post_processed: boolean;
   duration_ms?: number | null;
   dictionary_snapshot?: string | null;
+  prompt_tokens?: number | null;
+  completion_tokens?: number | null;
+  reasoning_tokens?: number | null;
+  total_tokens?: number | null;
+  cost?: number | null;
+}
+
+/** Result of an OpenRouter chat completion, with optional usage accounting. */
+export interface ChatResult {
+  content: string;
+  model: string | null;
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  reasoning_tokens: number | null;
+  total_tokens: number | null;
+  cost: number | null;
+}
+
+/** Aggregated token usage and cost over a time window. */
+export interface UsageSummary {
+  count: number;
+  post_processed_count: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  reasoning_tokens: number;
+  total_tokens: number;
+  cost: number;
 }
 
 export interface DictionaryEntry {

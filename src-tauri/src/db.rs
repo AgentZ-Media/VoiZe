@@ -46,6 +46,30 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         );
         "#,
     )?;
+    ensure_history_columns(&db)?;
+    Ok(())
+}
+
+/// Idempotent migration: add the OpenRouter usage/cost columns to older
+/// databases. All are nullable — a dictation without AI post-processing (or a
+/// provider that omits a field) simply stores NULL.
+fn ensure_history_columns(db: &Connection) -> rusqlite::Result<()> {
+    let existing: std::collections::HashSet<String> = {
+        let mut stmt = db.prepare("PRAGMA table_info(history)")?;
+        let cols = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        cols.filter_map(|c| c.ok()).collect()
+    };
+    for (name, ty) in [
+        ("prompt_tokens", "INTEGER"),
+        ("completion_tokens", "INTEGER"),
+        ("reasoning_tokens", "INTEGER"),
+        ("total_tokens", "INTEGER"),
+        ("cost", "REAL"),
+    ] {
+        if !existing.contains(name) {
+            db.execute(&format!("ALTER TABLE history ADD COLUMN {name} {ty}"), [])?;
+        }
+    }
     Ok(())
 }
 
@@ -63,6 +87,11 @@ pub struct HistoryEntry {
     pub post_processed: bool,
     pub duration_ms: Option<i64>,
     pub dictionary_snapshot: String,
+    pub prompt_tokens: Option<i64>,
+    pub completion_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub cost: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -77,6 +106,16 @@ pub struct NewHistoryEntry {
     pub post_processed: bool,
     pub duration_ms: Option<i64>,
     pub dictionary_snapshot: Option<String>,
+    #[serde(default)]
+    pub prompt_tokens: Option<i64>,
+    #[serde(default)]
+    pub completion_tokens: Option<i64>,
+    #[serde(default)]
+    pub reasoning_tokens: Option<i64>,
+    #[serde(default)]
+    pub total_tokens: Option<i64>,
+    #[serde(default)]
+    pub cost: Option<f64>,
 }
 
 #[tauri::command]
@@ -91,8 +130,9 @@ pub fn history_insert(
         INSERT INTO history (
           created_at, focused_app, bundle_id, window_title, raw_text,
           final_text, delivery_mode, model, post_processed, duration_ms,
-          dictionary_snapshot
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+          dictionary_snapshot, prompt_tokens, completion_tokens,
+          reasoning_tokens, total_tokens, cost
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
         "#,
         params![
             created_at,
@@ -105,7 +145,12 @@ pub fn history_insert(
             entry.model,
             if entry.post_processed { 1 } else { 0 },
             entry.duration_ms,
-            entry.dictionary_snapshot.unwrap_or_else(|| "[]".into())
+            entry.dictionary_snapshot.unwrap_or_else(|| "[]".into()),
+            entry.prompt_tokens,
+            entry.completion_tokens,
+            entry.reasoning_tokens,
+            entry.total_tokens,
+            entry.cost
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -118,7 +163,8 @@ fn history_get(db: &Connection, id: i64) -> Result<HistoryEntry, String> {
         r#"
         SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                final_text, delivery_mode, model, post_processed, duration_ms,
-               dictionary_snapshot
+               dictionary_snapshot, prompt_tokens, completion_tokens,
+               reasoning_tokens, total_tokens, cost
         FROM history WHERE id = ?1
         "#,
         [id],
@@ -136,6 +182,11 @@ fn history_get(db: &Connection, id: i64) -> Result<HistoryEntry, String> {
                 post_processed: row.get::<_, i64>(9)? != 0,
                 duration_ms: row.get(10)?,
                 dictionary_snapshot: row.get(11)?,
+                prompt_tokens: row.get(12)?,
+                completion_tokens: row.get(13)?,
+                reasoning_tokens: row.get(14)?,
+                total_tokens: row.get(15)?,
+                cost: row.get(16)?,
             })
         },
     )
@@ -209,6 +260,11 @@ fn row_to_history(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
         post_processed: row.get::<_, i64>(9)? != 0,
         duration_ms: row.get(10)?,
         dictionary_snapshot: row.get(11)?,
+        prompt_tokens: row.get(12)?,
+        completion_tokens: row.get(13)?,
+        reasoning_tokens: row.get(14)?,
+        total_tokens: row.get(15)?,
+        cost: row.get(16)?,
     })
 }
 
@@ -219,6 +275,58 @@ pub fn history_delete(app: tauri::AppHandle, id: i64) -> Result<bool, String> {
         .execute("DELETE FROM history WHERE id = ?1", [id])
         .map_err(|e| e.to_string())?;
     Ok(n > 0)
+}
+
+#[derive(Serialize, Default)]
+pub struct UsageSummary {
+    pub count: i64,
+    pub post_processed_count: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub reasoning_tokens: i64,
+    pub total_tokens: i64,
+    pub cost: f64,
+}
+
+/// Aggregate token usage and cost over an optional time window. `from`/`to` are
+/// RFC3339 timestamps (created_at is stored as RFC3339 UTC, so a lexical
+/// comparison is also chronological). A `None` bound is open-ended, so passing
+/// both as `None` yields the all-time total. `to` is exclusive.
+#[tauri::command]
+pub fn usage_summary(
+    app: tauri::AppHandle,
+    from: Option<String>,
+    to: Option<String>,
+) -> Result<UsageSummary, String> {
+    let db = conn(&app)?;
+    db.query_row(
+        r#"
+        SELECT
+          COUNT(*),
+          COALESCE(SUM(post_processed), 0),
+          COALESCE(SUM(prompt_tokens), 0),
+          COALESCE(SUM(completion_tokens), 0),
+          COALESCE(SUM(reasoning_tokens), 0),
+          COALESCE(SUM(total_tokens), 0),
+          COALESCE(SUM(cost), 0)
+        FROM history
+        WHERE (?1 IS NULL OR created_at >= ?1)
+          AND (?2 IS NULL OR created_at < ?2)
+        "#,
+        params![from, to],
+        |row| {
+            Ok(UsageSummary {
+                count: row.get(0)?,
+                post_processed_count: row.get(1)?,
+                prompt_tokens: row.get(2)?,
+                completion_tokens: row.get(3)?,
+                reasoning_tokens: row.get(4)?,
+                total_tokens: row.get(5)?,
+                cost: row.get(6)?,
+            })
+        },
+    )
+    .map_err(|e| e.to_string())
 }
 
 #[derive(Serialize, Deserialize, Clone)]

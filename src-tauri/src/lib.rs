@@ -73,6 +73,7 @@ pub fn run() {
             db::history_insert,
             db::history_list,
             db::history_delete,
+            db::usage_summary,
             db::dictionary_list,
             db::dictionary_upsert,
             db::dictionary_delete,

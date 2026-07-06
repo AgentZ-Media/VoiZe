@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   AsrStatus,
+  ChatResult,
   DictionaryEntry,
   DictionaryInput,
   HistoryEntry,
@@ -8,6 +9,7 @@ import type {
   OpenRouterModel,
   ScreenContext,
   Settings,
+  UsageSummary,
 } from "./types";
 
 export const getSettings = () => invoke<Settings>("get_settings");
@@ -56,6 +58,8 @@ export const historyList = (query?: string, limit?: number) =>
   invoke<HistoryEntry[]>("history_list", { query, limit });
 export const historyDelete = (id: number) =>
   invoke<boolean>("history_delete", { id });
+export const usageSummary = (from?: string | null, to?: string | null) =>
+  invoke<UsageSummary>("usage_summary", { from: from ?? null, to: to ?? null });
 
 export const dictionaryList = () =>
   invoke<DictionaryEntry[]>("dictionary_list");
@@ -75,4 +79,4 @@ export const openrouterChat = (
   model: string,
   messages: { role: string; content: string }[],
   temperature = 0.2,
-) => invoke<string>("openrouter_chat", { model, messages, temperature });
+) => invoke<ChatResult>("openrouter_chat", { model, messages, temperature });

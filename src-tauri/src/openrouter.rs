@@ -10,6 +10,20 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Result of a chat completion. `content` is the assistant text; the remaining
+/// fields mirror OpenRouter's `usage` object and are all optional because a
+/// provider may omit any of them (and the whole object is absent on error).
+#[derive(Serialize, Default)]
+pub struct ChatResult {
+    pub content: String,
+    pub model: Option<String>,
+    pub prompt_tokens: Option<i64>,
+    pub completion_tokens: Option<i64>,
+    pub reasoning_tokens: Option<i64>,
+    pub total_tokens: Option<i64>,
+    pub cost: Option<f64>,
+}
+
 fn headers(api_key: &str) -> Result<HeaderMap, String> {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
@@ -55,7 +69,7 @@ pub async fn openrouter_chat(
     model: String,
     messages: Vec<ChatMessage>,
     temperature: Option<f32>,
-) -> Result<String, String> {
+) -> Result<ChatResult, String> {
     let settings = settings::load(&app)?;
     if settings.openrouter_api_key.trim().is_empty() {
         return Err("OpenRouter API key is missing.".into());
@@ -65,6 +79,8 @@ pub async fn openrouter_chat(
         "model": model,
         "messages": messages,
         "temperature": temperature.unwrap_or(0.2),
+        // ask OpenRouter to attach the settled cost + token accounting
+        "usage": { "include": true },
     });
     let res = client
         .post("https://openrouter.ai/api/v1/chat/completions")
@@ -81,9 +97,19 @@ pub async fn openrouter_chat(
     if !status.is_success() {
         return Err(value.to_string());
     }
-    let content = &value["choices"][0]["message"]["content"];
-    if let Some(text) = content.as_str() {
-        return Ok(text.to_string());
-    }
-    Ok(content.to_string())
+    let content_value = &value["choices"][0]["message"]["content"];
+    let content = content_value
+        .as_str()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| content_value.to_string());
+    let usage = &value["usage"];
+    Ok(ChatResult {
+        content,
+        model: value["model"].as_str().map(|s| s.to_string()),
+        prompt_tokens: usage["prompt_tokens"].as_i64(),
+        completion_tokens: usage["completion_tokens"].as_i64(),
+        reasoning_tokens: usage["completion_tokens_details"]["reasoning_tokens"].as_i64(),
+        total_tokens: usage["total_tokens"].as_i64(),
+        cost: usage["cost"].as_f64(),
+    })
 }
