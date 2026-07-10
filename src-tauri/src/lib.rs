@@ -6,6 +6,7 @@ mod learn;
 mod native;
 mod openrouter;
 mod settings;
+mod transcription;
 mod tray;
 
 use tauri::Manager;
@@ -70,7 +71,7 @@ pub fn run() {
             asr::asr_remove_model,
             asr::asr_preload,
             asr::asr_unload,
-            asr::transcribe_audio,
+            transcription::transcribe_audio,
             context::screen_context,
             db::history_insert,
             db::history_list,

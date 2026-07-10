@@ -9,6 +9,10 @@ use crate::fs_util::write_private;
 #[serde(default)]
 pub struct Settings {
     pub openrouter_api_key: String,
+    pub transcription_backend: String,
+    pub transcription_model: String,
+    pub transcription_language: String,
+    pub cloud_fallback_to_local: bool,
     pub postprocess_enabled: bool,
     pub postprocess_min_words: u32,
     pub postprocess_model: String,
@@ -30,6 +34,10 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             openrouter_api_key: String::new(),
+            transcription_backend: "local".into(),
+            transcription_model: "openai/whisper-large-v3-turbo".into(),
+            transcription_language: "auto".into(),
+            cloud_fallback_to_local: true,
             postprocess_enabled: true,
             postprocess_min_words: 35,
             postprocess_model: "google/gemini-3.1-flash-lite".into(),
@@ -56,6 +64,22 @@ fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn normalize(settings: &mut Settings) {
+    if !matches!(settings.transcription_backend.as_str(), "local" | "openrouter") {
+        settings.transcription_backend = "local".into();
+    }
+    // Keep cloud transcription intentionally curated instead of exposing the
+    // full model catalog. MAI is included as an explicitly labelled preview.
+    if !matches!(
+        settings.transcription_model.trim(),
+        "openai/whisper-large-v3-turbo"
+            | "openai/whisper-large-v3"
+            | "microsoft/mai-transcribe-1.5"
+    ) {
+        settings.transcription_model = "openai/whisper-large-v3-turbo".into();
+    }
+    if !matches!(settings.transcription_language.as_str(), "auto" | "de" | "en") {
+        settings.transcription_language = "auto".into();
+    }
     if settings.postprocess_model.trim().is_empty() {
         settings.postprocess_model = "google/gemini-3.1-flash-lite".into();
     }
@@ -205,4 +229,42 @@ pub fn get_settings(app: tauri::AppHandle) -> Result<Settings, String> {
 #[tauri::command]
 pub fn save_settings(app: tauri::AppHandle, settings: Settings) -> Result<(), String> {
     store(&app, &settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_settings_default_to_local_transcription() {
+        let settings: Settings = serde_json::from_str("{}").expect("default settings");
+        assert_eq!(settings.transcription_backend, "local");
+        assert_eq!(settings.transcription_model, "openai/whisper-large-v3-turbo");
+        assert_eq!(settings.transcription_language, "auto");
+        assert!(settings.cloud_fallback_to_local);
+    }
+
+    #[test]
+    fn normalize_rejects_unknown_cloud_values() {
+        let mut settings = Settings::default();
+        settings.transcription_backend = "surprise-cloud".into();
+        settings.transcription_model = "arbitrary/model".into();
+        settings.transcription_language = "xx".into();
+        normalize(&mut settings);
+        assert_eq!(settings.transcription_backend, "local");
+        assert_eq!(settings.transcription_model, "openai/whisper-large-v3-turbo");
+        assert_eq!(settings.transcription_language, "auto");
+    }
+
+    #[test]
+    fn normalize_keeps_quality_whisper_and_german() {
+        let mut settings = Settings::default();
+        settings.transcription_backend = "openrouter".into();
+        settings.transcription_model = "openai/whisper-large-v3".into();
+        settings.transcription_language = "de".into();
+        normalize(&mut settings);
+        assert_eq!(settings.transcription_backend, "openrouter");
+        assert_eq!(settings.transcription_model, "openai/whisper-large-v3");
+        assert_eq!(settings.transcription_language, "de");
+    }
 }

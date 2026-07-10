@@ -4,6 +4,6 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>VoiZe benötigt Zugriff auf das Mikrofon, um Diktate lokal aufzunehmen.</string>
+  <string>VoiZe benötigt Zugriff auf das Mikrofon, um deine Diktate aufzunehmen und gemäß deiner Einstellung lokal oder in der Cloud zu transkribieren.</string>
 </dict>
 </plist>

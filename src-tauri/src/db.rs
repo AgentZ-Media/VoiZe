@@ -32,7 +32,12 @@ pub fn init(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
           model TEXT,
           post_processed INTEGER NOT NULL DEFAULT 0,
           duration_ms INTEGER,
-          dictionary_snapshot TEXT NOT NULL DEFAULT '[]'
+          dictionary_snapshot TEXT NOT NULL DEFAULT '[]',
+          transcription_backend TEXT NOT NULL DEFAULT 'local',
+          transcription_model TEXT,
+          transcription_latency_ms INTEGER,
+          transcription_cost REAL,
+          transcription_fallback_used INTEGER NOT NULL DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_history_created_at ON history(created_at DESC);
         CREATE TABLE IF NOT EXISTS dictionary (
@@ -93,6 +98,11 @@ fn ensure_history_columns(db: &Connection) -> rusqlite::Result<()> {
         ("reasoning_tokens", "INTEGER"),
         ("total_tokens", "INTEGER"),
         ("cost", "REAL"),
+        ("transcription_backend", "TEXT NOT NULL DEFAULT 'local'"),
+        ("transcription_model", "TEXT"),
+        ("transcription_latency_ms", "INTEGER"),
+        ("transcription_cost", "REAL"),
+        ("transcription_fallback_used", "INTEGER NOT NULL DEFAULT 0"),
     ] {
         if !existing.contains(name) {
             db.execute(&format!("ALTER TABLE history ADD COLUMN {name} {ty}"), [])?;
@@ -120,6 +130,11 @@ pub struct HistoryEntry {
     pub reasoning_tokens: Option<i64>,
     pub total_tokens: Option<i64>,
     pub cost: Option<f64>,
+    pub transcription_backend: String,
+    pub transcription_model: Option<String>,
+    pub transcription_latency_ms: Option<i64>,
+    pub transcription_cost: Option<f64>,
+    pub transcription_fallback_used: bool,
 }
 
 #[derive(Deserialize)]
@@ -144,6 +159,11 @@ pub struct NewHistoryEntry {
     pub total_tokens: Option<i64>,
     #[serde(default)]
     pub cost: Option<f64>,
+    pub transcription_backend: String,
+    pub transcription_model: Option<String>,
+    pub transcription_latency_ms: Option<i64>,
+    pub transcription_cost: Option<f64>,
+    pub transcription_fallback_used: bool,
 }
 
 #[tauri::command]
@@ -159,8 +179,10 @@ pub fn history_insert(
           created_at, focused_app, bundle_id, window_title, raw_text,
           final_text, delivery_mode, model, post_processed, duration_ms,
           dictionary_snapshot, prompt_tokens, completion_tokens,
-          reasoning_tokens, total_tokens, cost
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+          reasoning_tokens, total_tokens, cost, transcription_backend,
+          transcription_model, transcription_latency_ms, transcription_cost,
+          transcription_fallback_used
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
         "#,
         params![
             created_at,
@@ -178,7 +200,12 @@ pub fn history_insert(
             entry.completion_tokens,
             entry.reasoning_tokens,
             entry.total_tokens,
-            entry.cost
+            entry.cost,
+            entry.transcription_backend,
+            entry.transcription_model,
+            entry.transcription_latency_ms,
+            entry.transcription_cost,
+            if entry.transcription_fallback_used { 1 } else { 0 }
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -192,7 +219,9 @@ fn history_get(db: &Connection, id: i64) -> Result<HistoryEntry, String> {
         SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                final_text, delivery_mode, model, post_processed, duration_ms,
                dictionary_snapshot, prompt_tokens, completion_tokens,
-               reasoning_tokens, total_tokens, cost
+               reasoning_tokens, total_tokens, cost, transcription_backend,
+               transcription_model, transcription_latency_ms, transcription_cost,
+               transcription_fallback_used
         FROM history WHERE id = ?1
         "#,
         [id],
@@ -215,6 +244,11 @@ fn history_get(db: &Connection, id: i64) -> Result<HistoryEntry, String> {
                 reasoning_tokens: row.get(14)?,
                 total_tokens: row.get(15)?,
                 cost: row.get(16)?,
+                transcription_backend: row.get(17)?,
+                transcription_model: row.get(18)?,
+                transcription_latency_ms: row.get(19)?,
+                transcription_cost: row.get(20)?,
+                transcription_fallback_used: row.get::<_, i64>(21)? != 0,
             })
         },
     )
@@ -238,7 +272,9 @@ pub fn history_list(
                 SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                        final_text, delivery_mode, model, post_processed, duration_ms,
                        dictionary_snapshot, prompt_tokens, completion_tokens,
-                       reasoning_tokens, total_tokens, cost
+                       reasoning_tokens, total_tokens, cost, transcription_backend,
+                       transcription_model, transcription_latency_ms, transcription_cost,
+                       transcription_fallback_used
                 FROM history
                 WHERE raw_text LIKE ?1 OR final_text LIKE ?1 OR focused_app LIKE ?1
                 ORDER BY created_at DESC
@@ -259,7 +295,9 @@ pub fn history_list(
                 SELECT id, created_at, focused_app, bundle_id, window_title, raw_text,
                        final_text, delivery_mode, model, post_processed, duration_ms,
                        dictionary_snapshot, prompt_tokens, completion_tokens,
-                       reasoning_tokens, total_tokens, cost
+                       reasoning_tokens, total_tokens, cost, transcription_backend,
+                       transcription_model, transcription_latency_ms, transcription_cost,
+                       transcription_fallback_used
                 FROM history
                 ORDER BY created_at DESC
                 LIMIT ?1
@@ -295,6 +333,11 @@ fn row_to_history(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
         reasoning_tokens: row.get(14)?,
         total_tokens: row.get(15)?,
         cost: row.get(16)?,
+        transcription_backend: row.get(17)?,
+        transcription_model: row.get(18)?,
+        transcription_latency_ms: row.get(19)?,
+        transcription_cost: row.get(20)?,
+        transcription_fallback_used: row.get::<_, i64>(21)? != 0,
     })
 }
 
@@ -311,10 +354,14 @@ pub fn history_delete(app: tauri::AppHandle, id: i64) -> Result<bool, String> {
 pub struct UsageSummary {
     pub count: i64,
     pub post_processed_count: i64,
+    pub cloud_transcribed_count: i64,
     pub prompt_tokens: i64,
     pub completion_tokens: i64,
     pub reasoning_tokens: i64,
     pub total_tokens: i64,
+    pub transcription_cost: f64,
+    pub postprocess_cost: f64,
+    pub background_cost: f64,
     pub cost: f64,
 }
 
@@ -337,11 +384,13 @@ pub fn usage_summary(
         SELECT
           COUNT(*),
           COALESCE(SUM(post_processed), 0),
+          COALESCE(SUM(CASE WHEN transcription_backend = 'openrouter' THEN 1 ELSE 0 END), 0),
           COALESCE(SUM(prompt_tokens), 0),
           COALESCE(SUM(completion_tokens), 0),
           COALESCE(SUM(reasoning_tokens), 0),
           COALESCE(SUM(total_tokens), 0),
-          COALESCE(SUM(cost), 0)
+          COALESCE(SUM(cost), 0),
+          COALESCE(SUM(transcription_cost), 0)
         FROM history
         WHERE (?1 IS NULL OR created_at >= ?1)
           AND (?2 IS NULL OR created_at < ?2)
@@ -351,11 +400,15 @@ pub fn usage_summary(
                 Ok(UsageSummary {
                     count: row.get(0)?,
                     post_processed_count: row.get(1)?,
-                    prompt_tokens: row.get(2)?,
-                    completion_tokens: row.get(3)?,
-                    reasoning_tokens: row.get(4)?,
-                    total_tokens: row.get(5)?,
-                    cost: row.get(6)?,
+                    cloud_transcribed_count: row.get(2)?,
+                    prompt_tokens: row.get(3)?,
+                    completion_tokens: row.get(4)?,
+                    reasoning_tokens: row.get(5)?,
+                    total_tokens: row.get(6)?,
+                    postprocess_cost: row.get(7)?,
+                    transcription_cost: row.get(8)?,
+                    background_cost: 0.0,
+                    cost: row.get::<_, f64>(7)? + row.get::<_, f64>(8)?,
                 })
             },
         )
@@ -391,6 +444,7 @@ pub fn usage_summary(
     summary.completion_tokens += event_usage.1;
     summary.reasoning_tokens += event_usage.2;
     summary.total_tokens += event_usage.3;
+    summary.background_cost = event_usage.4;
     summary.cost += event_usage.4;
     Ok(summary)
 }
@@ -917,4 +971,41 @@ pub fn dictionary_replace_all(
     }
     tx.commit().map_err(|e| e.to_string())?;
     dictionary_list(app)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_history_schema_gets_cloud_transcription_columns() {
+        let db = Connection::open_in_memory().expect("in-memory db");
+        db.execute_batch(
+            r#"
+            CREATE TABLE history (
+              id INTEGER PRIMARY KEY,
+              raw_text TEXT NOT NULL,
+              final_text TEXT NOT NULL
+            );
+            "#,
+        )
+        .expect("legacy schema");
+        ensure_history_columns(&db).expect("migration");
+        let columns: std::collections::HashSet<String> = {
+            let mut stmt = db.prepare("PRAGMA table_info(history)").unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .unwrap()
+                .map(|row| row.unwrap())
+                .collect()
+        };
+        for expected in [
+            "transcription_backend",
+            "transcription_model",
+            "transcription_latency_ms",
+            "transcription_cost",
+            "transcription_fallback_used",
+        ] {
+            assert!(columns.contains(expected), "missing {expected}");
+        }
+    }
 }

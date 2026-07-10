@@ -13,6 +13,7 @@ import type {
   OpenRouterModel,
   ScreenContext,
   Settings,
+  TranscriptionResult,
   UsageSummary,
 } from "./types";
 
@@ -41,11 +42,23 @@ export const asrDownload = () => invoke<void>("asr_download");
 export const asrCancelDownload = () => invoke<void>("asr_cancel_download");
 export const asrRemoveModel = () => invoke<void>("asr_remove_model");
 export const asrPreload = () => invoke<void>("asr_preload");
-export const transcribeAudio = (pcmB64: string) =>
-  invoke<{ text: string; engine: string; duration_ms: number | null }>(
-    "transcribe_audio",
-    { pcmB64 },
-  );
+export const transcribeAudio = (
+  pcmB64: string,
+  settings: Pick<
+    Settings,
+    | "transcription_backend"
+    | "transcription_model"
+    | "transcription_language"
+    | "cloud_fallback_to_local"
+  >,
+) =>
+  invoke<TranscriptionResult>("transcribe_audio", {
+    pcmB64,
+    backend: settings.transcription_backend,
+    model: settings.transcription_model,
+    language: settings.transcription_language,
+    fallbackToLocal: settings.cloud_fallback_to_local,
+  });
 
 export const deliverText = (
   text: string,

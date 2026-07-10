@@ -625,6 +625,10 @@ textarea {
   opacity: 1;
 }
 
+.autosave.error {
+  color: var(--danger);
+}
+
 /* Fortschritt (Modell-Download) */
 .progress-track {
   height: 5px;
@@ -1141,7 +1145,7 @@ textarea {
 
 .usage-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 8px;
 }
 

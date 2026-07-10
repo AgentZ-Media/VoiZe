@@ -154,6 +154,7 @@ export default function App() {
   const [caption, setCaption] = useState("Bereit");
   const [error, setError] = useState("");
   const settingsRef = useRef<Settings | null>(null);
+  const recordingSettingsRef = useRef<Settings | null>(null);
   const recorder = useRef(new VoiceRecorder());
   const contextPromiseRef = useRef<Promise<ScreenContext | null> | null>(null);
   const phase = useRef<Phase>("idle");
@@ -254,7 +255,7 @@ export default function App() {
   /// disk. If it's missing, the settings window opens on the diagnostics
   /// pane and the download starts automatically (with resume); the pane
   /// itself renders progress from the asr:// events.
-  const ensureAsrReady = useCallback(async (s: Settings) => {
+  const ensureLocalAsrReady = useCallback(async (s: Settings) => {
     const status = await asrStatus().catch(() => null);
     if (status?.installed) {
       modelReady.current = true;
@@ -301,6 +302,16 @@ export default function App() {
     }
   }, [startRuntime]);
 
+  const syncTranscriptionRuntime = useCallback(async (s: Settings) => {
+    if (s.transcription_backend === "openrouter") {
+      const status = await asrStatus().catch(() => null);
+      modelReady.current = Boolean(status?.installed);
+      startRuntime(s);
+      return;
+    }
+    await ensureLocalAsrReady(s);
+  }, [ensureLocalAsrReady, startRuntime]);
+
   useEffect(() => {
     // position once at launch — afterwards the pill stays wherever the
     // user drags it (for this session). The window becomes visible now
@@ -315,7 +326,7 @@ export default function App() {
       .then((s) => {
         settingsRef.current = s;
         setSettings(s);
-        void ensureAsrReady(s);
+        void syncTranscriptionRuntime(s);
       })
       .catch((e) => {
         setError(String(e));
@@ -333,15 +344,17 @@ export default function App() {
         // startup path didn't already
         modelReady.current = true;
         const s = settingsRef.current;
-        if (s && !runtimeStarted.current) {
-          startRuntime(s);
-          void asrPreload().catch(() => {});
+        if (s) {
+          if (!runtimeStarted.current) startRuntime(s);
+          if (s.transcription_backend === "local") {
+            void asrPreload().catch(() => {});
+          }
         }
       }),
       listen<Settings>("settings-saved", (event) => {
         settingsRef.current = event.payload;
         setSettings(event.payload);
-        if (modelReady.current) startRuntime(event.payload);
+        void syncTranscriptionRuntime(event.payload);
       }),
     ];
     return () => {
@@ -349,13 +362,29 @@ export default function App() {
       void unregisterAll();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ensureAsrReady, startRuntime]);
+  }, [startRuntime, syncTranscriptionRuntime]);
 
   async function startRecording() {
     const activeSettings = settingsRef.current;
-    if (!activeSettings || !modelReady.current || phase.current !== "idle") return;
+    if (!activeSettings || phase.current !== "idle") return;
+    const cloud = activeSettings.transcription_backend === "openrouter";
+    if (!cloud && !modelReady.current) return;
+    if (
+      cloud &&
+      !activeSettings.openrouter_api_key.trim() &&
+      !(activeSettings.cloud_fallback_to_local && modelReady.current)
+    ) {
+      showPill();
+      setCaption("OpenRouter-Schlüssel fehlt");
+      setState("error");
+      void playStatusSound("error");
+      void showSettings("ai").catch(() => {});
+      hideSoon(3200);
+      return;
+    }
     phase.current = "starting";
     pending.current = "none";
+    recordingSettingsRef.current = { ...activeSettings };
     setError("");
     setCaption("Hört zu");
     setState("recording");
@@ -375,6 +404,7 @@ export default function App() {
     } catch (e) {
       phase.current = "idle";
       pending.current = "none";
+      recordingSettingsRef.current = null;
       setError(String(e));
       setCaption("Mikrofon nicht verfügbar");
       setState("error");
@@ -384,7 +414,7 @@ export default function App() {
   }
 
   async function stopRecording() {
-    const activeSettings = settingsRef.current;
+    const activeSettings = recordingSettingsRef.current ?? settingsRef.current;
     if (!activeSettings) return;
     if (phase.current === "starting") {
       pending.current = "stop";
@@ -393,7 +423,11 @@ export default function App() {
     if (phase.current !== "recording") return;
     phase.current = "processing";
     setLevel(0);
-    setCaption("Transkribiert lokal");
+    setCaption(
+      activeSettings.transcription_backend === "openrouter"
+        ? "Transkribiert in der Cloud"
+        : "Transkribiert lokal",
+    );
     setState("transcribing");
     if (activeSettings.finish_sound_enabled) void playStatusSound("stop");
     try {
@@ -405,7 +439,8 @@ export default function App() {
         hidePill();
         return;
       }
-      const asr = await transcribeAudio(recording.pcmB64);
+      const asr = await transcribeAudio(recording.pcmB64, activeSettings);
+      if (asr.fallback_used) setCaption("Cloud nicht erreichbar – lokal");
       const dictionary = await dictionaryList().catch(() => []);
       let finalText = applyDictionary(asr.text, dictionary);
       let postProcessed = false;
@@ -461,7 +496,7 @@ export default function App() {
         raw_text: asr.text,
         final_text: finalText,
         delivery_mode: delivery,
-        model: postProcessed ? activeSettings.postprocess_model : asr.engine,
+        model: postProcessed ? activeSettings.postprocess_model : null,
         post_processed: postProcessed,
         duration_ms: recording.durationMs,
         dictionary_snapshot: JSON.stringify(dictionary),
@@ -470,6 +505,11 @@ export default function App() {
         reasoning_tokens: usage?.reasoning_tokens ?? null,
         total_tokens: usage?.total_tokens ?? null,
         cost: usage?.cost ?? null,
+        transcription_backend: asr.backend,
+        transcription_model: asr.model,
+        transcription_latency_ms: asr.duration_ms,
+        transcription_cost: asr.cost,
+        transcription_fallback_used: asr.fallback_used,
       }).catch(() => {});
       setCaption(
         delivery === "insert"
@@ -483,12 +523,15 @@ export default function App() {
       setCaption("Fehler");
       setState("error");
       void playStatusSound("error");
-      if (/modell|model|installiert/i.test(String(e))) {
+      if (/OPENROUTER|Cloud|API-Schlüssel/i.test(String(e))) {
+        await showSettings("ai").catch(() => {});
+      } else if (/modell|model|installiert/i.test(String(e))) {
         await showSettings("diagnostics").catch(() => {});
       }
       hideSoon(4200);
     } finally {
       contextPromiseRef.current = null;
+      recordingSettingsRef.current = null;
       phase.current = "idle";
       pending.current = "none";
     }
@@ -503,6 +546,7 @@ export default function App() {
     phase.current = "processing";
     await recorder.current.stop().catch(() => null);
     contextPromiseRef.current = null;
+    recordingSettingsRef.current = null;
     phase.current = "idle";
     pending.current = "none";
     setLevel(0);

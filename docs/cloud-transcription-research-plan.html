@@ -1,0 +1,608 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VoiZe · Cloud-Transkription über OpenRouter</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: oklch(0.105 0.006 260);
+      --sidebar: oklch(0.14 0.008 260);
+      --surface: oklch(0.175 0.011 260);
+      --surface-2: oklch(0.215 0.013 260);
+      --ink: oklch(0.96 0 0);
+      --ink-2: oklch(0.78 0.012 260);
+      --ink-3: oklch(0.66 0.012 260);
+      --hair: oklch(1 0 0 / 0.12);
+      --hair-strong: oklch(1 0 0 / 0.2);
+      --primary: oklch(0.76 0.105 195);
+      --primary-soft: oklch(0.76 0.105 195 / 0.12);
+      --amber: oklch(0.79 0.12 75);
+      --amber-soft: oklch(0.79 0.12 75 / 0.12);
+      --danger: oklch(0.69 0.18 24);
+      --success: oklch(0.74 0.12 150);
+      --radius: 10px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--bg);
+      font-size: 14px;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--primary); text-underline-offset: 3px; }
+    a:hover { color: var(--ink); }
+    h1, h2, h3 { text-wrap: balance; }
+    p, li { text-wrap: pretty; }
+    code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.9em;
+      color: oklch(0.88 0.08 195);
+      overflow-wrap: anywhere;
+    }
+    .shell { min-height: 100vh; display: grid; grid-template-columns: 238px minmax(0, 1fr); }
+    nav {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow: auto;
+      padding: 28px 18px;
+      background: var(--sidebar);
+      border-right: 1px solid var(--hair);
+    }
+    .brand { padding: 0 9px 22px; }
+    .brand strong { display: block; font-size: 16px; letter-spacing: -0.01em; }
+    .brand span { display: block; margin-top: 4px; color: var(--ink-3); font-size: 12px; }
+    nav a {
+      display: block;
+      padding: 7px 9px;
+      border-radius: 7px;
+      color: var(--ink-2);
+      text-decoration: none;
+      font-size: 13px;
+    }
+    nav a:hover { color: var(--ink); background: oklch(1 0 0 / 0.06); }
+    nav .sub { padding-left: 20px; font-size: 12px; color: var(--ink-3); }
+    main { min-width: 0; }
+    .hero {
+      padding: 68px max(32px, calc((100vw - 238px - 1060px) / 2)) 54px;
+      border-bottom: 1px solid var(--hair);
+      background: oklch(0.125 0.01 260);
+    }
+    .status-line { display: flex; flex-wrap: wrap; gap: 8px 16px; color: var(--ink-3); font-size: 12px; }
+    .status-line .live { color: var(--success); }
+    h1 { margin: 18px 0 16px; max-width: 860px; font-size: 42px; line-height: 1.08; letter-spacing: -0.035em; }
+    .lede { max-width: 72ch; margin: 0; color: var(--ink-2); font-size: 17px; line-height: 1.65; }
+    .verdict {
+      display: grid;
+      grid-template-columns: 168px minmax(0, 1fr);
+      gap: 24px;
+      max-width: 900px;
+      margin-top: 34px;
+      padding: 22px 0;
+      border-top: 1px solid var(--hair-strong);
+      border-bottom: 1px solid var(--hair-strong);
+    }
+    .verdict-label { color: var(--primary); font-weight: 650; }
+    .verdict p { margin: 0; font-size: 16px; }
+    .content { max-width: 1060px; margin: 0 auto; padding: 24px 32px 100px; }
+    section { padding: 46px 0; border-bottom: 1px solid var(--hair); }
+    section:last-child { border-bottom: 0; }
+    h2 { margin: 0 0 16px; font-size: 25px; line-height: 1.2; letter-spacing: -0.025em; }
+    h3 { margin: 32px 0 10px; font-size: 17px; letter-spacing: -0.012em; }
+    .section-intro { max-width: 74ch; color: var(--ink-2); }
+    .decision-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 28px;
+      border: 1px solid var(--hair-strong);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .decision-grid article { padding: 24px; background: var(--surface); }
+    .decision-grid article + article { border-left: 1px solid var(--hair-strong); }
+    .decision-grid .recommended { background: var(--primary-soft); }
+    .decision-grid .tag { color: var(--ink-3); font-size: 12px; }
+    .decision-grid h3 { margin: 8px 0; font-size: 18px; }
+    .decision-grid p { margin: 0; color: var(--ink-2); }
+    .decision-grid .price { display: block; margin-top: 18px; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .callout {
+      margin: 24px 0;
+      padding: 16px 18px;
+      border: 1px solid var(--hair-strong);
+      border-radius: 8px;
+      background: var(--surface);
+      color: var(--ink-2);
+    }
+    .callout strong { color: var(--ink); }
+    .callout.warning { background: var(--amber-soft); }
+    .table-wrap { margin: 24px 0; overflow-x: auto; border: 1px solid var(--hair); border-radius: var(--radius); }
+    table { width: 100%; border-collapse: collapse; min-width: 820px; font-size: 13px; }
+    th, td { padding: 12px 14px; border-bottom: 1px solid var(--hair); text-align: left; vertical-align: top; }
+    th { position: sticky; top: 0; background: var(--surface-2); color: var(--ink-2); font-weight: 600; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: oklch(1 0 0 / 0.025); }
+    td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .rank { display: inline-flex; min-width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
+    .rank.one { background: var(--primary); color: var(--bg); font-weight: 700; }
+    .yes { color: var(--success); }
+    .no { color: var(--ink-3); }
+    .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
+    ul, ol { padding-left: 20px; }
+    li + li { margin-top: 7px; }
+    .flow {
+      display: flex;
+      align-items: stretch;
+      gap: 10px;
+      margin: 24px 0;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+    .flow .node {
+      min-width: 150px;
+      flex: 1;
+      padding: 15px;
+      border: 1px solid var(--hair-strong);
+      border-radius: 8px;
+      background: var(--surface);
+    }
+    .flow .node strong { display: block; margin-bottom: 3px; }
+    .flow .node span { color: var(--ink-3); font-size: 12px; }
+    .flow .arrow { align-self: center; color: var(--ink-3); font-size: 18px; }
+    .branch {
+      display: grid;
+      grid-template-columns: 160px 1fr;
+      gap: 18px;
+      margin: 18px 0;
+      padding: 18px;
+      border: 1px solid var(--hair);
+      border-radius: 8px;
+    }
+    .branch > strong { color: var(--primary); }
+    .branch p { margin: 0; color: var(--ink-2); }
+    .mock-window {
+      max-width: 760px;
+      margin: 28px auto;
+      border: 1px solid var(--hair-strong);
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--surface);
+    }
+    .mock-title { height: 42px; display: flex; align-items: center; justify-content: center; background: var(--surface-2); border-bottom: 1px solid var(--hair); font-weight: 600; }
+    .mock-body { padding: 16px 20px 22px; }
+    .mock-row { display: grid; grid-template-columns: 1fr 250px; gap: 24px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--hair); }
+    .mock-row:last-child { border-bottom: 0; }
+    .mock-row small { display: block; margin-top: 2px; color: var(--ink-3); }
+    .segmented { display: grid; grid-template-columns: 1fr 1fr; padding: 2px; background: oklch(0.09 0 0); border-radius: 7px; }
+    .segmented span { padding: 6px 9px; text-align: center; color: var(--ink-3); }
+    .segmented .active { border-radius: 5px; background: var(--surface-2); color: var(--ink); }
+    .select, .switch { border: 1px solid var(--hair-strong); background: var(--surface-2); border-radius: 7px; padding: 7px 10px; color: var(--ink); }
+    .switch { justify-self: end; width: 34px; height: 20px; padding: 2px; border-radius: 999px; background: var(--primary); }
+    .switch::after { content: ""; display: block; width: 14px; height: 14px; margin-left: 14px; border-radius: 999px; background: var(--ink); }
+    .consent { margin-top: 14px; padding: 12px 14px; border-radius: 7px; background: var(--amber-soft); color: var(--ink-2); font-size: 12px; }
+    .roadmap { margin-top: 28px; }
+    .phase { display: grid; grid-template-columns: 106px 1fr 190px; gap: 24px; padding: 22px 0; border-top: 1px solid var(--hair); }
+    .phase:first-child { border-top-color: var(--hair-strong); }
+    .phase-id { color: var(--primary); font-weight: 650; }
+    .phase h3 { margin: 0 0 5px; }
+    .phase p { margin: 0; color: var(--ink-2); }
+    .phase .gate { color: var(--ink-3); font-size: 12px; }
+    .checklist { columns: 2; column-gap: 40px; padding-left: 0; list-style: none; }
+    .checklist li { break-inside: avoid; position: relative; padding: 8px 0 8px 25px; border-bottom: 1px solid var(--hair); }
+    .checklist li::before { content: "✓"; position: absolute; left: 3px; color: var(--success); }
+    .sources { columns: 2; column-gap: 34px; }
+    .sources li { break-inside: avoid; margin: 0 0 9px; }
+    .fine { color: var(--ink-3); font-size: 12px; }
+    footer { padding: 24px 0 0; color: var(--ink-3); font-size: 12px; }
+    @media (max-width: 900px) {
+      .shell { display: block; }
+      nav { position: static; width: 100%; max-width: 100vw; height: auto; display: flex; gap: 4px; padding: 12px; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--hair); }
+      nav .brand, nav .sub { display: none; }
+      nav a { white-space: nowrap; }
+      .hero { padding: 46px 24px; }
+      .content { padding: 20px 24px 80px; }
+      .decision-grid { grid-template-columns: 1fr; }
+      .decision-grid article + article { border-left: 0; border-top: 1px solid var(--hair-strong); }
+      .split { grid-template-columns: 1fr; gap: 12px; }
+      .phase { grid-template-columns: 80px 1fr; }
+      .phase .gate { grid-column: 2; }
+    }
+    @media (max-width: 620px) {
+      h1 { font-size: 34px; }
+      .verdict { grid-template-columns: 1fr; gap: 6px; }
+      .mock-row, .branch { grid-template-columns: 1fr; gap: 10px; }
+      .checklist, .sources { columns: 1; }
+      .phase { grid-template-columns: 1fr; gap: 6px; }
+      .phase .gate { grid-column: auto; }
+    }
+    @media print {
+      :root { color-scheme: light; --bg: white; --sidebar: white; --surface: #f6f7f8; --surface-2: #eceff1; --ink: #111; --ink-2: #333; --ink-3: #555; --hair: #ddd; --hair-strong: #bbb; --primary: #087f86; --primary-soft: #e7f5f5; --amber-soft: #fff5dd; }
+      nav { display: none; }
+      .shell { display: block; }
+      .hero { padding: 32px 0; }
+      .content { padding: 0; }
+      section { break-inside: avoid; }
+      a { color: #087f86; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav aria-label="Inhalt">
+      <div class="brand"><strong>VoiZe Research</strong><span>Cloud-Transkription · 10.07.2026</span></div>
+      <a href="#entscheidung">Empfehlung</a>
+      <a href="#markt">Marktbild</a>
+      <a href="#modelle">OpenRouter-Modelle</a>
+      <a class="sub" href="#kosten">Kosten</a>
+      <a class="sub" href="#qualitaet">Qualität</a>
+      <a href="#privacy">Datenschutz</a>
+      <a href="#benchmark">Benchmark</a>
+      <a href="#architektur">Architektur</a>
+      <a class="sub" href="#ux">Einstellungen</a>
+      <a href="#umsetzung">Umsetzungsplan</a>
+      <a href="#risiken">Risiken</a>
+      <a href="#quellen">Quellen</a>
+    </nav>
+
+    <main>
+      <header class="hero">
+        <div class="status-line"><span class="live">● Recherche abgeschlossen</span><span>Stand 10. Juli 2026</span><span>OpenRouter-Katalog live geprüft</span><span>VoiZe-Repo analysiert</span></div>
+        <h1>Cloud-Transkription als bewusste Alternative – nicht als Ersatz für Local-first</h1>
+        <p class="lede">OpenRouter bietet inzwischen einen dedizierten Speech-to-Text-Endpunkt mit zehn Modellen. Für VoiZe ist das technisch gut anschließbar und erstaunlich günstig. Der richtige Schritt ist ein kuratierter Cloud-Modus mit eigenem Deutsch/Englisch-Diktierbenchmark, expliziter Einwilligung und lokalem Standard.</p>
+        <div class="verdict">
+          <div class="verdict-label">Kurzurteil</div>
+          <p><strong>Ja, bauen.</strong> Als Opt-in-Beta mit <strong>Whisper Large V3 Turbo</strong> als extrem günstigem Fast-Modus, <strong>Whisper Large V3</strong> als Qualitätsmodus und <strong>MAI-Transcribe 1.5</strong> als ausdrücklich gekennzeichnetem Preview-Kandidaten. Den langfristigen Cloud-Default nach einem VoiZe-eigenen Blindtest festlegen.</p>
+        </div>
+      </header>
+
+      <div class="content">
+        <section id="entscheidung">
+          <h2>Empfehlung für VoiZe</h2>
+          <p class="section-intro">Es gibt aktuell kein seriöses universelles „Go-to-Modell“. Anbieter-Benchmarks messen andere Datensätze, Sprachen und Audiolängen. Für kurze deutsche und englische Diktate ergibt sich aber eine klare Kandidatenliste.</p>
+          <div class="decision-grid">
+            <article class="recommended">
+              <span class="tag">Cloud Balanced · erwarteter Default</span>
+              <h3>Voxtral Mini Transcribe 2</h3>
+              <p>Sehr starkes Preis-/Qualitätsprofil, Deutsch, robust gegen Rauschen. Die OpenRouter-ID routet derzeit auf Mistrals 2602-Version.</p>
+              <span class="price">$0,003 / Minute · $1,80 / 10 Stunden</span>
+            </article>
+            <article>
+              <span class="tag">Maximum Accuracy · Referenz</span>
+              <h3>GPT-4o Transcribe</h3>
+              <p>Etablierter Premium-Kandidat für Akzente, Rauschen und schwierige Sprache. Qualität gegen Voxtral muss VoiZe selbst entscheiden.</p>
+              <span class="price">ca. $0,006 / Minute · tokenbasiert</span>
+            </article>
+            <article>
+              <span class="tag">Fast &amp; Private Routing</span>
+              <h3>Whisper Large V3 Turbo</h3>
+              <p>Über Groq extrem schnell und billig; ZDR-fähig. Eher Cloud-Offload als sicherer Qualitätssprung gegenüber lokalem Parakeet.</p>
+              <span class="price">$0,04 / Stunde · $0,40 / 10 Stunden</span>
+            </article>
+          </div>
+          <div class="callout warning"><strong>Produktentscheidung:</strong> In Version 1 keine Liste mit zehn Modellen zeigen. Sichtbar nur „Lokal“ und „Cloud“. Unter „Erweitert“ höchstens die drei kuratierten Profile. Ein Modellkatalog ist Infrastruktur, kein gutes Standard-UX.</div>
+          <div class="callout"><strong>Umgesetzte erste Auswahl:</strong> Whisper Large V3 Turbo, Whisper Large V3 und MAI-Transcribe 1.5 (Preview), jeweils mit Auto/Deutsch/Englisch und ZDR-Anforderung. Voxtral und GPT-4o bleiben Benchmark-Kandidaten für eine spätere Erweiterung.</div>
+          <div class="split">
+            <div>
+              <h3>Was wir shippen sollten</h3>
+              <ul>
+                <li>Lokal bleibt voreingestellt, offlinefähig und ohne API-Key nutzbar.</li>
+                <li>Cloud wird aktiv gewählt und verlässt nie stillschweigend den Mac.</li>
+                <li>Cloud → Lokal darf optional als Fehler-Fallback dienen.</li>
+                <li>ASR und KI-Nachbearbeitung bleiben zwei getrennte Stufen.</li>
+                <li>Modellwahl bleibt austauschbar und über Telemetrie messbar.</li>
+              </ul>
+            </div>
+            <div>
+              <h3>Was wir nicht shippen sollten</h3>
+              <ul>
+                <li>Kein automatischer Lokal → Cloud-Fallback.</li>
+                <li>Kein Qualitätsversprechen nur aus Hersteller-WER.</li>
+                <li>Keine Speicherung von Audio oder API-Keys in React/SQLite/Logs.</li>
+                <li>Keine Meeting-Features wie Diarisierung im ersten Schritt.</li>
+                <li>Keine Annahme, dass native Provider-Extras auch über OpenRouter funktionieren.</li>
+              </ul>
+            </div>
+          </div>
+        </section>
+
+        <section id="markt">
+          <h2>Was andere Tools tun</h2>
+          <p class="section-intro">Der Markt bestätigt das Hybridmodell. Die besten Produkte verkaufen nicht einen Modellnamen, sondern zuverlässiges Diktieren mit einem lokalen oder Cloud-basierten Verarbeitungspfad.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Produkt</th><th>Öffentlich belegter Stack</th><th>Lehre für VoiZe</th></tr></thead>
+              <tbody>
+                <tr><td><strong>Superwhisper</strong></td><td>Lokal Parakeet/Whisper; Cloud u. a. ElevenLabs Scribe V2, Deepgram Nova-3 und eigene Modelle.</td><td>Direktester Beleg, dass eine kuratierte Hybridstrategie verstanden wird.</td></tr>
+                <tr><td><strong>MacWhisper</strong></td><td>Lokal Whisper/Parakeet; Cloud opt-in via OpenAI, Groq, ElevenLabs, Deepgram oder eigener OpenAI-kompatibler Server.</td><td>Local-first plus BYOK-Cloud ist glaubwürdig und power-user-tauglich.</td></tr>
+                <tr><td><strong>Granola</strong></td><td>Nennt Deepgram und Assembly; konkrete Modelle können wechseln.</td><td>Providerabstraktion statt Modellversprechen; Ergebnis ist wichtiger als SKU.</td></tr>
+                <tr><td><strong>Wispr Flow</strong></td><td>Cloudpipeline; konkretes Speech-Modell nicht öffentlich verifiziert.</td><td>Nicht spekulieren. Der Vorsprung liegt in Kontext, Dictionary, Formatierung und Pipeline.</td></tr>
+                <tr><td><strong>Otter / Read</strong></td><td>Proprietäre Cloud-ASR- und Meeting-Pipelines.</td><td>Meeting-Stacks sind nicht der richtige Scope für VoiZe-Kurzdiktate.</td></tr>
+                <tr><td><strong>Notta</strong></td><td>Cloud plus „Privacy Mode“ mit lokaler Transkription; auf geeigneten Macs Apple Speech Analyzer.</td><td>„Lokal / Cloud“ ist verständlicher als eine lange Modellauswahl.</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="fine">Wichtig: Subprozessorlisten belegen nicht, welches konkrete ASR-Modell jede Anfrage verarbeitet. Für Wispr Flow ist deshalb keine belastbare Modellzuordnung möglich.</p>
+        </section>
+
+        <section id="modelle">
+          <h2>Alle aktuellen OpenRouter-STT-Modelle</h2>
+          <p class="section-intro">Live über die Models API mit <code>output_modalities=transcription</code> geprüft. Preise sind Listenpreise vor der OpenRouter-Creditgebühr. GPT-4o-Werte pro Minute sind Schätzwerte; abgerechnet wird nach tatsächlichen Tokens und <code>usage.cost</code>.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Priorität</th><th>Modell</th><th>Preis</th><th>10 h</th><th>ZDR aktuell</th><th>VoiZe-Einordnung</th></tr></thead>
+              <tbody>
+                <tr><td><span class="rank one">1</span></td><td><strong>Voxtral Mini Transcribe</strong><br><code>mistralai/voxtral-mini-transcribe</code></td><td class="num">$0,003/min</td><td class="num">$1,80</td><td class="no">Nein</td><td>Erwarteter Balanced-Sieger; 13 Sprachen inkl. Deutsch, neue 2602-Version.</td></tr>
+                <tr><td><span class="rank">2</span></td><td><strong>GPT-4o Transcribe</strong><br><code>openai/gpt-4o-transcribe</code></td><td class="num">ca. $0,006/min</td><td class="num">ca. $3,60</td><td class="no">Nein</td><td>Premium-Referenz für schwierige Audios; tokenbasiert.</td></tr>
+                <tr><td><span class="rank">3</span></td><td><strong>Whisper Large V3 Turbo</strong><br><code>openai/whisper-large-v3-turbo</code></td><td class="num">$0,04/h</td><td class="num">$0,40</td><td class="yes">Ja · Groq</td><td>Kosten-/Latenzsieger, 99+ Sprachen; kein sicherer Qualitätsgewinn.</td></tr>
+                <tr><td><span class="rank">4</span></td><td><strong>GPT-4o Mini Transcribe</strong><br><code>openai/gpt-4o-mini-transcribe</code></td><td class="num">ca. $0,003/min</td><td class="num">ca. $1,80</td><td class="no">Nein</td><td>Preisgleiche OpenAI-Alternative zu Voxtral; sinnvoll im Benchmark.</td></tr>
+                <tr><td><span class="rank">5</span></td><td><strong>Chirp 3</strong><br><code>google/chirp-3</code></td><td class="num">$0,016/min</td><td class="num">$9,60</td><td class="yes">Ja · Google</td><td>Starke Noise-/Sprachfeatures, aber mit Abstand teuerster Kandidat.</td></tr>
+                <tr><td><span class="rank">6</span></td><td><strong>MAI-Transcribe 1.5</strong><br><code>microsoft/mai-transcribe-1.5</code></td><td class="num">$0,36/h</td><td class="num">$3,60</td><td class="yes">Ja · Azure</td><td>Als experimentelles Profil integriert; 100+ Locales, aktuell Public Preview ohne SLA.</td></tr>
+                <tr><td><span class="rank">7</span></td><td><strong>Qwen3 ASR Flash</strong><br><code>qwen/qwen3-asr-flash-2026-02-10</code></td><td class="num">$0,000035/s</td><td class="num">$1,26</td><td class="no">Nein</td><td>Gut bei Noise/Code-Switching; Datenschutz/Region weniger passend.</td></tr>
+                <tr><td><span class="rank">8</span></td><td><strong>Parakeet TDT 0.6B v3</strong><br><code>nvidia/parakeet-tdt-0.6b-v3</code></td><td class="num">$0,0015/min</td><td class="num">$0,90</td><td class="yes">Ja · Together</td><td>Gleiche Modellfamilie wie lokal; Offload, aber kein Cloud-Qualitätsargument.</td></tr>
+                <tr><td><span class="rank">9</span></td><td><strong>Whisper Large V3</strong><br><code>openai/whisper-large-v3</code></td><td class="num">ab $0,0015/min</td><td class="num">ab $0,90</td><td class="yes">Ja</td><td>Solider Klassiker, aber gegenüber den Topkandidaten kein klarer Vorteil.</td></tr>
+                <tr><td><span class="rank">10</span></td><td><strong>Whisper 1</strong><br><code>openai/whisper-1</code></td><td class="num">$0,006/min</td><td class="num">$3,60</td><td class="no">Nein</td><td>Legacy. Für eine neue Integration weder Preis- noch Qualitätsfavorit.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 id="kosten">Was kostet das realistisch?</h3>
+          <p>Selbst intensive Diktiernutzung bleibt günstig. Beispiel: 30 Minuten pro Tag entsprechen ungefähr 900 Audiominuten im Monat.</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Profil</th><th>Pro Minute</th><th>30 min/Tag</th><th>60 min/Tag</th><th>Einordnung</th></tr></thead>
+              <tbody>
+                <tr><td>Whisper V3 Turbo</td><td class="num">$0,000667</td><td class="num">$0,60</td><td class="num">$1,20</td><td>Nahezu vernachlässigbar</td></tr>
+                <tr><td>Voxtral / GPT-4o Mini</td><td class="num">ca. $0,003</td><td class="num">ca. $2,70</td><td class="num">ca. $5,40</td><td>Ideal für BYOK-Power-User</td></tr>
+                <tr><td>GPT-4o / MAI</td><td class="num">ca. $0,006</td><td class="num">ca. $5,40</td><td class="num">ca. $10,80</td><td>Immer noch günstig, wenn Qualität sichtbar besser ist</td></tr>
+                <tr><td>Chirp 3</td><td class="num">$0,016</td><td class="num">$14,40</td><td class="num">$28,80</td><td>Nur bei messbarem Spezialvorteil</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="fine">Hinzu kommen bei Pay-as-you-go derzeit 5,5 % Plattformgebühr beim Kauf von OpenRouter-Credits (laut OpenRouter mindestens $0,80 pro Kauf). Preise und ZDR-Verfügbarkeit sind dynamisch und sollten in VoiZe nicht hart als dauerhaft garantiert dargestellt werden.</p>
+
+          <h3 id="qualitaet">Wie krass ist die Qualität?</h3>
+          <div class="split">
+            <div>
+              <p><strong>Voxtral 2</strong> nennt rund 4 % WER auf FLEURS und positioniert sich preislich deutlich unter vielen spezialisierten STT-Anbietern. Unabhängige Artificial-Analysis-Messungen älterer/anderer Voxtral-Deployments liegen ebenfalls stark, sind aber nicht exakt derselbe OpenRouter-Endpunkt.</p>
+              <p><strong>GPT-4o Transcribe</strong> ist OpenAIs Qualitätsmodell und verbessert laut OpenAI WER, Sprachenerkennung und Robustheit gegenüber Whisper – insbesondere bei Akzenten, Rauschen und variabler Sprechgeschwindigkeit.</p>
+            </div>
+            <div>
+              <p><strong>Lokales Parakeet</strong> ist bereits außergewöhnlich gut und schnell. Der Cloudmodus muss deshalb nicht nur eine Benchmarkzahl schlagen, sondern Eigennamen, Code-Switching und reale VoiZe-Selbstkorrekturen sichtbar zuverlässiger treffen.</p>
+              <p><strong>WER ist nicht genug:</strong> Ein Modell kann wenige Wortfehler haben und trotzdem Produktnamen, Zahlen oder gesprochene Satzzeichen schlechter behandeln. Genau diese Fehler sind beim Diktieren teurer als kleine Funktionswort-Abweichungen.</p>
+            </div>
+          </div>
+          <div class="callout"><strong>Erwartung, nicht Vorentscheidung:</strong> Voxtral 2 gewinnt wahrscheinlich Preis/Qualität, GPT-4o Full gewinnt oder teilt die Qualitätsstufe, Whisper Turbo gewinnt Kosten/Latenz. Der eigene Blindtest darf dieses Ergebnis ausdrücklich widerlegen.</div>
+        </section>
+
+        <section id="privacy">
+          <h2>Datenschutz: Cloud darf nicht wie lokal aussehen</h2>
+          <p class="section-intro">OpenRouter selbst sagt, Prompts standardmäßig nicht zu speichern, solange Logging nicht aktiviert ist. Das Audio wird aber an den ausgewählten Upstream-Provider gesendet. Dessen konkrete Retention- und Regionsregeln bleiben relevant.</p>
+          <div class="branch"><strong>Lokaler Modus</strong><p>Audio bleibt auf dem Mac. Kein Netzwerk, kein API-Key, keine Providerabhängigkeit. Das ist und bleibt die VoiZe-Standardgarantie.</p></div>
+          <div class="branch"><strong>Cloud-Modus</strong><p>Audio wird an OpenRouter und den Modellanbieter übertragen. Vor erster Nutzung muss der Nutzer das bewusst bestätigen; Modell/Provider und Datenschutzhinweis bleiben in den Einstellungen sichtbar.</p></div>
+          <div class="branch"><strong>ZDR-Modus</strong><p>Mit <code>provider: { zdr: true, data_collection: "deny" }</code> nur an Zero-Data-Retention-Endpunkte routen. Wenn keiner verfügbar ist, klar fehlschlagen oder – nur nach Opt-in – lokal zurückfallen.</p></div>
+          <h3>Aktuell ZDR-fähige STT-Pfade</h3>
+          <p>Parakeet (Together), Whisper Large V3 (Together/Groq), Whisper Large V3 Turbo (Groq), Chirp 3 (Google) und MAI-Transcribe 1.5 (Azure). Voxtral 2, GPT-4o Transcribe/Mini, Qwen und Whisper-1 stehen zum Prüfzeitpunkt nicht in OpenRouters ZDR-Endpunktliste.</p>
+          <div class="callout warning"><strong>Konsequenz:</strong> „Cloud Balanced“ mit Voxtral kann nicht gleichzeitig als ZDR garantiert werden. Deshalb sollte V1 entweder ein separates „Privates Routing“-Profil anbieten oder nach dem Benchmark prüfen, ob ein ZDR-Modell den Qualitätsanspruch bereits erfüllt. EU-Verarbeitung ist über OpenRouter nicht automatisch garantiert; <code>eu.openrouter.ai</code> ist laut Dokumentation Enterprise/auf Anfrage.</div>
+          <h3>Security-Härtung vor dem Rollout</h3>
+          <ul class="checklist">
+            <li>Frontend erhält nur <code>openrouter_api_key_configured</code>, nie den Schlüssel.</li>
+            <li>Separate Commands zum Setzen/Löschen des Keychain-Secrets.</li>
+            <li>Kein Schlüssel in React-State oder <code>settings-saved</code>-Events.</li>
+            <li>Keychain-Zugriff nicht mit dem Secret in Prozessargumenten.</li>
+            <li>Kein Audio in Logs, Tempfiles, SQLite oder Crash-Metadaten.</li>
+            <li>Requestgröße, Timeout und Fehlerantworten hart begrenzen.</li>
+          </ul>
+        </section>
+
+        <section id="benchmark">
+          <h2>Der entscheidende Schritt: ein VoiZe-Diktierbenchmark</h2>
+          <p class="section-intro">Öffentliche Leaderboards sind Orientierung, nicht Produktentscheidung. VoiZe braucht kurze Einzelsprecher-Aufnahmen mit genau den Fehlerarten, die beim Schreiben im Alltag weh tun.</p>
+          <h3>Testkorpus</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Kategorie</th><th>Umfang</th><th>Beispiele</th><th>Warum</th></tr></thead>
+              <tbody>
+                <tr><td>Deutsch, natürlich</td><td>30 Clips</td><td>Nachrichten, E-Mail, Notizen</td><td>Primärer Alltag</td></tr>
+                <tr><td>Englisch, natürlich</td><td>20 Clips</td><td>Mail, Issue, kurze Dokumentation</td><td>Zweite Kernsprache</td></tr>
+                <tr><td>DE/EN Code-Switching</td><td>15 Clips</td><td>„Deploy das auf staging“, Modell-/API-Namen</td><td>Typischer Power-User-Fall</td></tr>
+                <tr><td>Eigennamen &amp; Fachbegriffe</td><td>15 Clips</td><td>OpenRouter, Parakeet, Tauri, Personennamen</td><td>Dictionary-/Term-Recall</td></tr>
+                <tr><td>Selbstkorrektur &amp; Satzzeichen</td><td>10 Clips</td><td>„morgen – nein, Freitag“, „neuer Absatz“</td><td>Diktier-spezifische Qualität</td></tr>
+                <tr><td>Schwierige Akustik</td><td>10 Clips</td><td>Flüstern, Distanz, Tastatur, Raumgeräusch</td><td>Cloudversprechen unter Stress</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <h3>Kandidaten und Messung</h3>
+          <p>Mindestens lokales Parakeet, Whisper V3 Turbo, Whisper V3, MAI-Transcribe 1.5, Voxtral 2, GPT-4o Full und Chirp 3. Rohtranskripte zuerst ohne Wörterbuch und ohne Nachbearbeitung vergleichen; danach einen separaten End-to-End-Lauf mit der bestehenden VoiZe-Pipeline.</p>
+          <div class="split">
+            <div>
+              <ol>
+                <li>Goldtranskripte manuell erstellen und normalisieren.</li>
+                <li>Alle Modelle blind und mit identischen WAVs ausführen.</li>
+                <li>WER/CER plus Fachbegriff-Recall und Zahlen-Exact-Match messen.</li>
+                <li>Interpunktions-F1, Halluzinationen und leere Ergebnisse zählen.</li>
+                <li>p50/p95 vom Loslassen bis zum Rohtext messen.</li>
+                <li><code>usage.cost</code>, Provider und Generation-ID protokollieren – nie Audio.</li>
+              </ol>
+            </div>
+            <div class="callout"><strong>Go/No-Go-Gate:</strong> Cloud wird nicht als „besser“ vermarktet, wenn sie lokales Parakeet nicht bei VoiZe-relevanten Fehlern sichtbar schlägt. Zielgröße: mindestens 15 % relative WER-Verbesserung oder deutlich höherer Term-/Zahlen-Recall, p95-Latenz im akzeptablen Diktierfluss und Fehlerquote unter 0,5 % im Beta-Korpus.</div>
+          </div>
+        </section>
+
+        <section id="architektur">
+          <h2>Technische Zielarchitektur</h2>
+          <p class="section-intro">VoiZe hat bereits fast alle Bausteine: PCM16-Aufnahme, Rust-Backend, OpenRouter-Keychain, Nachbearbeitung und History. Die wichtigste Änderung ist eine zentrale Transkriptionsfassade statt einer Verzweigung im React-HUD.</p>
+          <h3>Heute</h3>
+          <div class="flow" aria-label="Aktueller Datenfluss">
+            <div class="node"><strong>Recorder</strong><span>16 kHz mono PCM16 Base64</span></div><div class="arrow">→</div>
+            <div class="node"><strong>Lokales Parakeet</strong><span><code>asr.rs</code></span></div><div class="arrow">→</div>
+            <div class="node"><strong>Wörterbuch</strong><span>deterministisch</span></div><div class="arrow">→</div>
+            <div class="node"><strong>OpenRouter optional</strong><span>Text-Nachbearbeitung</span></div><div class="arrow">→</div>
+            <div class="node"><strong>Einfügen + History</strong><span>Clipboard/Paste</span></div>
+          </div>
+          <h3>Ziel</h3>
+          <div class="flow" aria-label="Zukünftiger Datenfluss">
+            <div class="node"><strong>Recorder</strong><span>gemeinsames PCM16</span></div><div class="arrow">→</div>
+            <div class="node"><strong>Rust-Fassade</strong><span><code>transcription.rs</code></span></div><div class="arrow">→</div>
+            <div class="node"><strong>Local oder Cloud</strong><span>explizite Route + optionaler lokaler Fallback</span></div><div class="arrow">→</div>
+            <div class="node"><strong>Gemeinsame Pipeline</strong><span>Dictionary → Polish → Delivery</span></div><div class="arrow">→</div>
+            <div class="node"><strong>Getrennte Telemetrie</strong><span>ASR vs. Nachbearbeitung</span></div>
+          </div>
+
+          <h3>OpenRouter-Adapter</h3>
+          <ul>
+            <li><code>POST https://openrouter.ai/api/v1/audio/transcriptions</code> mit demselben bestehenden API-Key.</li>
+            <li>PCM16 aus <code>recorder.ts</code> in Rust validieren und mit einem 44-Byte-WAV-Header versehen; kein Tempfile.</li>
+            <li>JSON: <code>{ model, input_audio: { data, format: "wav" }, language?, temperature: 0, provider? }</code>.</li>
+            <li>Antwort: Text, Sekunden, Token, Kosten und <code>X-Generation-Id</code> in ein typisiertes Resultat mappen.</li>
+            <li>Connect-/Gesamt-Timeout, harte Größen-/Dauerschranke und ein begrenzter Retry für 429/502/503.</li>
+            <li>Top-level <code>prompt</code> nicht für das Wörterbuch einplanen: OpenRouter akzeptiert es laut STT-Doku, ignoriert es aber. Die bestehende Dictionary-/Polish-Stufe bleibt entscheidend.</li>
+          </ul>
+
+          <h3>Resultat- und Datenmodell</h3>
+          <p>Das gemeinsame Resultat sollte mindestens <code>text</code>, <code>backend</code>, <code>model</code>, <code>provider</code>, <code>latency_ms</code>, <code>fallback_used</code>, <code>usage</code>, <code>cost</code> und <code>generation_id</code> enthalten. <code>history.model</code> ist heute überladen und muss getrennt werden:</p>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Neue History-Felder</th><th>Zweck</th></tr></thead>
+              <tbody>
+                <tr><td><code>transcription_backend</code>, <code>transcription_model</code></td><td>Lokal/Cloud und tatsächliches ASR-Modell</td></tr>
+                <tr><td><code>transcription_latency_ms</code>, <code>transcription_cost</code></td><td>Performance und echte Cloudkosten</td></tr>
+                <tr><td><code>postprocess_model</code>, <code>postprocess_cost</code></td><td>KI-Nachbearbeitung getrennt vom ASR</td></tr>
+                <tr><td><code>duration_ms</code></td><td>Bleibt eindeutig Aufnahme-/Sprechdauer</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 id="ux">Vorgeschlagene Einstellungen</h3>
+          <div class="mock-window" aria-label="Wireframe der Transkriptions-Einstellungen">
+            <div class="mock-title">KI · Transkription</div>
+            <div class="mock-body">
+              <div class="mock-row"><div><strong>Verarbeitung</strong><small>Lokal bleibt empfohlen und funktioniert offline.</small></div><div class="segmented"><span>Lokal</span><span class="active">Cloud</span></div></div>
+              <div class="mock-row"><div><strong>Cloud-Profil</strong><small>Kuratiert und mit VoiZe-Diktaten getestet.</small></div><div class="select">Balanced · Voxtral 2</div></div>
+              <div class="mock-row"><div><strong>Privates Routing</strong><small>Nur Zero-Data-Retention-Endpunkte verwenden.</small></div><div class="switch" aria-hidden="true"></div></div>
+              <div class="mock-row"><div><strong>Bei Cloudfehler lokal transkribieren</strong><small>Nur verfügbar, wenn das lokale Modell installiert ist.</small></div><div class="switch" aria-hidden="true"></div></div>
+              <div class="consent">Cloud ist aktiv. Deine Aufnahme wird zur Transkription an OpenRouter und den ausgewählten Modellanbieter gesendet. Audio wird von VoiZe nicht gespeichert.</div>
+            </div>
+          </div>
+          <p class="fine">HUD-Texte backendabhängig: „Transkribiert lokal“ bzw. „Transkribiert in der Cloud“. Bei Fallback darf der tatsächliche Pfad in History/Diagnose sichtbar sein, ohne den Diktierfluss mit Techniktext zu überladen.</p>
+        </section>
+
+        <section id="umsetzung">
+          <h2>Detaillierter Umsetzungsplan</h2>
+          <p class="section-intro">Die Reihenfolge hält Local-first jederzeit stabil. Jede Phase hat ein klares Gate; Cloud wird erst sichtbar, wenn Sicherheit, Messbarkeit und Fehlerverhalten stimmen.</p>
+          <div class="roadmap">
+            <article class="phase"><div class="phase-id">Phase 0</div><div><h3>Benchmark-Harness und Modellentscheid</h3><p>Testkorpus, Runner und Auswertung bauen. Lokales Parakeet gegen Voxtral 2, GPT-4o, GPT-4o Mini, Whisper Turbo und Chirp vergleichen. Roh-ASR und End-to-End getrennt messen.</p></div><div class="gate">Gate: Blindtest + Kosten-/Latenzreport; Cloud-Default begründet.</div></article>
+            <article class="phase"><div class="phase-id">Phase 1</div><div><h3>Secret- und Settings-Modell härten</h3><p>Public Settings vom Keychain-Secret trennen. Neue Felder <code>transcription_backend</code>, <code>transcription_profile</code>, <code>cloud_zdr</code> und <code>cloud_fallback_to_local</code>, Default immer <code>local</code>.</p></div><div class="gate">Gate: API-Key erscheint weder im Frontend-State noch in Events, Dateien oder Prozessargumenten.</div></article>
+            <article class="phase"><div class="phase-id">Phase 2</div><div><h3>Transkriptionsfassade einführen</h3><p>Neues <code>src-tauri/src/transcription.rs</code> als einziges Tauri-Command. Bestehende lokale Funktion dahinter routen, Ergebnis-DTO typisieren. Local-Verhalten bleibt unverändert.</p></div><div class="gate">Gate: Offline-Regressionstest entspricht dem heutigen Produkt.</div></article>
+            <article class="phase"><div class="phase-id">Phase 3</div><div><h3>OpenRouter-STT-Adapter</h3><p>WAV-Builder, Request-/Response-Typen, Timeouts, Größenlimits, Fehlercodes, ZDR-Option, Usage/Cost und Generation-ID. Hinter Dev-Flag; kein UI-Exposure.</p></div><div class="gate">Gate: Unit-Tests + kostenpflichtiger, manuell aktivierter Smoke-Test.</div></article>
+            <article class="phase"><div class="phase-id">Phase 4</div><div><h3>Runtime, UI und Fallback</h3><p>Startup-Gate backendfähig machen: Cloud darf ohne 670-MB-Modelldownload starten; Local/Fallback preloaden nur wenn nötig. Einstellungen, Einwilligung, HUD-Text und strukturierte Fehler ergänzen.</p></div><div class="gate">Gate: Mode-Wechsel zur Laufzeit, offline, 401/402/429/Timeout und lokaler Fallback manuell geprüft.</div></article>
+            <article class="phase"><div class="phase-id">Phase 5</div><div><h3>History, Kosten und Diagnose</h3><p>SQLite-Migration für getrennte ASR-/Postprocess-Felder. Kostenübersicht ohne Doppelzählung. History zeigt Backend, Modell und Fallback korrekt; Audio bleibt flüchtig.</p></div><div class="gate">Gate: Legacy-DB-Migration und Rundungs-/Summierungstests bestehen.</div></article>
+            <article class="phase"><div class="phase-id">Phase 6</div><div><h3>Opt-in-Beta und Release</h3><p>Nur kuratierte Profile freischalten, Messdaten sammeln, Default anhand realer Ergebnisse bestätigen. README und Datenschutztext von „100 % lokal“ zu „lokal standardmäßig, Cloud optional“ präzisieren.</p></div><div class="gate">Gate: Fehlerquote &lt;0,5 %, keine Privacy-Regressions, aussagekräftige Release Notes.</div></article>
+          </div>
+
+          <h3>Konkrete Dateien</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Datei</th><th>Änderung</th></tr></thead>
+              <tbody>
+                <tr><td><code>src-tauri/src/transcription.rs</code></td><td>Neue zentrale Fassade, Routing und gemeinsames Resultat.</td></tr>
+                <tr><td><code>src-tauri/src/openrouter.rs</code> oder <code>cloud_asr.rs</code></td><td>Dedizierter Audioadapter; Chat-Nachbearbeitung nicht verwässern.</td></tr>
+                <tr><td><code>src-tauri/src/asr.rs</code></td><td>Lokale Transcribe-Funktion intern für die Fassade zugänglich machen.</td></tr>
+                <tr><td><code>src-tauri/src/settings.rs</code></td><td>Backend/Profile/Fallback/ZDR; Secret-DTO und Keychain-Härtung.</td></tr>
+                <tr><td><code>src-tauri/src/db.rs</code></td><td>Idempotente Migration, getrennte Modelle/Kosten/Latenz.</td></tr>
+                <tr><td><code>src-tauri/src/lib.rs</code></td><td>Neues Modul/Command registrieren.</td></tr>
+                <tr><td><code>src/App.tsx</code></td><td>Backendabhängige Readiness, Caption, strukturierte Fehler, Resultat persistieren.</td></tr>
+                <tr><td><code>src/components/SettingsPanel.tsx</code></td><td>Local/Cloud-Auswahl, Consent, Profile, ZDR und Fallback.</td></tr>
+                <tr><td><code>src/lib/api.ts</code>, <code>src/lib/types.ts</code></td><td>Neue Commands und typisierte Resultate/Settings.</td></tr>
+                <tr><td><code>src/styles.css</code></td><td>Kompakte native Controls und Warnhinweis im bestehenden Otto-Stil.</td></tr>
+                <tr><td><code>README.md</code></td><td>Local-first korrekt erklären; Cloud als bewusstes Opt-in dokumentieren.</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>Verifikation</h3>
+          <ul class="checklist">
+            <li>WAV-Header, Bytegrößen, PCM-Unverändertheit.</li>
+            <li>Leeres, ungerades und zu großes PCM abweisen.</li>
+            <li>Request-/Response-Parsing inklusive fehlender Usage.</li>
+            <li>401, 402, 413, 429, 5xx und Timeout klassifizieren.</li>
+            <li>Alte Settings laden immer mit Local-Default.</li>
+            <li>Routingmatrix mit/ohne Key/Modell/Fallback testen.</li>
+            <li>Legacy-SQLite migrieren und Kosten nicht doppelt zählen.</li>
+            <li>Local komplett offline und ohne API-Key testen.</li>
+            <li>Cloud ohne installiertes lokales Modell testen.</li>
+            <li>DE/EN, Eigennamen, Stille und Netzverlust testen.</li>
+            <li><code>npm run build</code> und <code>cargo check</code>.</li>
+            <li>Release Notes mit Privacy-/Netzwerkhinweis.</li>
+          </ul>
+        </section>
+
+        <section id="risiken">
+          <h2>Risiken und Gegenmaßnahmen</h2>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Risiko</th><th>Auswirkung</th><th>Gegenmaßnahme</th></tr></thead>
+              <tbody>
+                <tr><td>Cloud fühlt sich langsamer an</td><td>Diktierfluss bricht trotz besserer WER.</td><td>p95-End-to-End als Release-Gate; Fast-Profil; lokal bleibt Standard.</td></tr>
+                <tr><td>Provider/Preis/Modell ändert sich</td><td>Unvorhersehbare Qualität oder Kosten.</td><td>Profile serverunabhängig modellieren, IDs pinnen, Usage-Kosten speichern, Katalog regelmäßig prüfen.</td></tr>
+                <tr><td>ZDR passt nicht zum besten Modell</td><td>Privacy-Positionierung wird unklar.</td><td>Separates ZDR-Profil und ehrliche Consent-Copy; kein stiller Wechsel.</td></tr>
+                <tr><td>Lokales Startup-Gate blockiert Cloud</td><td>Cloudnutzer müssen unnötig 670 MB laden.</td><td>Readiness nach Backend aufteilen und <code>asr_model_ready</code> als stale Cache entfernen.</td></tr>
+                <tr><td>API-Key gelangt ins Webview</td><td>Unnötig große Secret-Angriffsfläche.</td><td>Public Settings + separate Keychain-Commands vor Cloud-Rollout.</td></tr>
+                <tr><td>ASR- und LLM-Kosten werden vermischt</td><td>History/Insights sind falsch.</td><td>Getrennte DB-Spalten und Summen; tatsächliche <code>usage.cost</code> ist die Quelle.</td></tr>
+                <tr><td>Große Aufnahme/Base64-Kopien</td><td>Speicherlast oder Provider-Timeout.</td><td>V1 auf Kurzdiktate begrenzen, Byte-/Zeitlimit, später Chunking statt unlimitiert.</td></tr>
+                <tr><td>Native Modellfeatures fehlen über OpenRouter</td><td>Keyword-Bias, Timestamps oder Denoiser funktionieren nicht.</td><td>Nur normalisierte Textantwort versprechen; Capability-Tests pro Provider.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="quellen">
+          <h2>Quellen und Prüfstand</h2>
+          <p class="section-intro">Primärquellen wurden bevorzugt. Preise, Modellkatalog und ZDR-Endpunkte sind dynamisch; die Angaben spiegeln den Stand vom 10.07.2026 wider.</p>
+          <h3>OpenRouter</h3>
+          <ul class="sources">
+            <li><a href="https://openrouter.ai/docs/guides/overview/multimodal/stt">Speech-to-Text-Dokumentation</a></li>
+            <li><a href="https://openrouter.ai/api/v1/models?output_modalities=transcription">Live Models API: Transcription</a></li>
+            <li><a href="https://openrouter.ai/models?output_modalities=transcription">STT-Modellkatalog</a></li>
+            <li><a href="https://openrouter.ai/docs/guides/features/zdr">Zero Data Retention</a></li>
+            <li><a href="https://openrouter.ai/api/v1/endpoints/zdr">Live ZDR-Endpunktliste</a></li>
+            <li><a href="https://openrouter.ai/pricing">OpenRouter Pricing</a></li>
+            <li><a href="https://openrouter.ai/mistralai/voxtral-mini-transcribe">Voxtral Mini Transcribe</a></li>
+            <li><a href="https://openrouter.ai/openai/gpt-4o-transcribe">GPT-4o Transcribe</a></li>
+            <li><a href="https://openrouter.ai/openai/whisper-large-v3-turbo">Whisper Large V3 Turbo</a></li>
+            <li><a href="https://openrouter.ai/google/chirp-3">Google Chirp 3</a></li>
+          </ul>
+          <h3>Modellanbieter und Benchmarks</h3>
+          <ul class="sources">
+            <li><a href="https://mistral.ai/news/voxtral-transcribe-2/">Mistral: Voxtral Transcribe 2</a></li>
+            <li><a href="https://docs.mistral.ai/models/model-cards/voxtral-mini-transcribe-26-02">Mistral Model Card</a></li>
+            <li><a href="https://openai.com/index/introducing-our-next-generation-audio-models/">OpenAI: Next-generation audio models</a></li>
+            <li><a href="https://developers.openai.com/api/docs/models/gpt-4o-transcribe">OpenAI GPT-4o Transcribe</a></li>
+            <li><a href="https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3">NVIDIA Parakeet Model Card</a></li>
+            <li><a href="https://console.groq.com/docs/speech-to-text">Groq Speech-to-Text</a></li>
+            <li><a href="https://docs.cloud.google.com/speech-to-text/v2/docs/chirp-model">Google Chirp</a></li>
+            <li><a href="https://learn.microsoft.com/en-us/azure/ai-services/speech-service/mai-transcribe">Microsoft MAI-Transcribe</a></li>
+            <li><a href="https://artificialanalysis.ai/speech-to-text/models/whisper">Artificial Analysis STT</a></li>
+          </ul>
+          <h3>Wettbewerber</h3>
+          <ul class="sources">
+            <li><a href="https://superwhisper.com/models">Superwhisper Models</a></li>
+            <li><a href="https://docs.macwhisper.com/article/18-cloud-transcription">MacWhisper Cloud Transcription</a></li>
+            <li><a href="https://docs.macwhisper.com/article/52-keeping-transcriptions-private">MacWhisper Privacy</a></li>
+            <li><a href="https://www.granola.ai/security">Granola Security</a></li>
+            <li><a href="https://wisprflow.ai/legal/dpa">Wispr Flow DPA</a></li>
+            <li><a href="https://www.notta.ai/en/features/privacy-mode">Notta Privacy Mode</a></li>
+            <li><a href="https://help.otter.ai/hc/en-us/articles/360048322533-Speech-transcription-accuracy-FAQ">Otter ASR FAQ</a></li>
+          </ul>
+          <footer>Erstellt als Implementierungs- und Entscheidungsgrundlage für VoiZe. Keine Produktdateien wurden im Rahmen der Recherche verändert; dieses Dokument ist der einzige neue Artefakt-Stand.</footer>
+        </section>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

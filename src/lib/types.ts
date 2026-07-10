@@ -1,5 +1,12 @@
 export interface Settings {
   openrouter_api_key: string;
+  transcription_backend: "local" | "openrouter";
+  transcription_model:
+    | "openai/whisper-large-v3-turbo"
+    | "openai/whisper-large-v3"
+    | "microsoft/mai-transcribe-1.5";
+  transcription_language: "auto" | "de" | "en";
+  cloud_fallback_to_local: boolean;
   postprocess_enabled: boolean;
   postprocess_min_words: number;
   postprocess_model: string;
@@ -15,6 +22,22 @@ export interface Settings {
   asr_model_ready: boolean;
   custom_instructions: string;
   learning_enabled: boolean;
+}
+
+export interface TranscriptionResult {
+  text: string;
+  engine: string;
+  backend: "local" | "openrouter";
+  model: string;
+  provider: string | null;
+  duration_ms: number | null;
+  fallback_used: boolean;
+  audio_seconds: number | null;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  cost: number | null;
+  generation_id: string | null;
 }
 
 export interface ScreenContext {
@@ -43,6 +66,11 @@ export interface HistoryEntry {
   reasoning_tokens: number | null;
   total_tokens: number | null;
   cost: number | null;
+  transcription_backend: string;
+  transcription_model: string | null;
+  transcription_latency_ms: number | null;
+  transcription_cost: number | null;
+  transcription_fallback_used: boolean;
 }
 
 export interface NewHistoryEntry {
@@ -61,6 +89,11 @@ export interface NewHistoryEntry {
   reasoning_tokens?: number | null;
   total_tokens?: number | null;
   cost?: number | null;
+  transcription_backend: string;
+  transcription_model?: string | null;
+  transcription_latency_ms?: number | null;
+  transcription_cost?: number | null;
+  transcription_fallback_used: boolean;
 }
 
 /** Result of an OpenRouter chat completion, with optional usage accounting. */
@@ -78,10 +111,14 @@ export interface ChatResult {
 export interface UsageSummary {
   count: number;
   post_processed_count: number;
+  cloud_transcribed_count: number;
   prompt_tokens: number;
   completion_tokens: number;
   reasoning_tokens: number;
   total_tokens: number;
+  transcription_cost: number;
+  postprocess_cost: number;
+  background_cost: number;
   cost: number;
 }
 

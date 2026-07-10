@@ -77,6 +77,10 @@ fn is_installed(dir: &PathBuf) -> bool {
     })
 }
 
+pub(crate) fn local_model_installed() -> bool {
+    model_dir().map(|dir| is_installed(&dir)).unwrap_or(false)
+}
+
 static MODEL: once_cell::sync::Lazy<parking_lot::Mutex<Option<ParakeetModel>>> =
     once_cell::sync::Lazy::new(|| parking_lot::Mutex::new(None));
 static DOWNLOADING: AtomicBool = AtomicBool::new(false);
@@ -293,8 +297,7 @@ pub async fn asr_preload() -> Result<(), String> {
 /// Transcribe one recording of 16 kHz mono 16-bit PCM (base64, no WAV
 /// header — the webview already decoded/resampled the capture). Loads the
 /// model on first use and keeps it resident for fast follow-up dictations.
-#[tauri::command]
-pub async fn transcribe_audio(pcm_b64: String) -> Result<TranscriptionResult, String> {
+pub(crate) async fn transcribe_local(pcm_b64: String) -> Result<TranscriptionResult, String> {
     tauri::async_runtime::spawn_blocking(move || transcribe(&pcm_b64))
         .await
         .map_err(|e| e.to_string())?

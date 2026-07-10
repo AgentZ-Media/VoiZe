@@ -107,6 +107,7 @@ function SwitchRow({
       <input
         type="checkbox"
         className="switch"
+        aria-label={label}
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
       />
@@ -117,7 +118,9 @@ function SwitchRow({
 export default function SettingsPanel({ section, settings, onSettings }: Props) {
   const [form, setForm] = useState<Settings | null>(settings);
   const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState("");
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveRevision = useRef(0);
 
   useEffect(() => setForm(settings), [settings]);
 
@@ -131,14 +134,24 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
 
   const set = (patch: Partial<Settings>) => {
     const next = { ...form, ...patch };
+    const revision = saveRevision.current + 1;
+    saveRevision.current = revision;
     setForm(next);
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(async () => {
-      await saveSettings(next);
-      onSettings(next);
-      setSaved(true);
-      void emit("settings-saved", next);
-      window.setTimeout(() => setSaved(false), 1600);
+      try {
+        await saveSettings(next);
+        if (revision !== saveRevision.current) return;
+        onSettings(next);
+        setSaveError("");
+        setSaved(true);
+        void emit("settings-saved", next);
+        window.setTimeout(() => setSaved(false), 1600);
+      } catch (error) {
+        if (revision !== saveRevision.current) return;
+        setSaved(false);
+        setSaveError(String(error));
+      }
     }, 450);
   };
 
@@ -152,7 +165,9 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
       {section === "history" && <History />}
       {section === "diagnostics" && <Diagnostics />}
       {section === "about" && <About form={form} set={set} />}
-      <div className={`autosave ${saved ? "visible" : ""}`}>Gespeichert</div>
+      <div className={`autosave ${saved || saveError ? "visible" : ""} ${saveError ? "error" : ""}`}>
+        {saveError ? "Speichern fehlgeschlagen" : "Gespeichert"}
+      </div>
     </div>
   );
 }
@@ -676,7 +691,97 @@ function AI({
 
   return (
     <>
-      <Group title="OpenRouter">
+      <Group title="Transkription">
+        <Row
+          label="Verarbeitung"
+          hint={
+            form.transcription_backend === "local"
+              ? "Audio bleibt auf diesem Mac und wird mit NVIDIA Parakeet transkribiert."
+              : "Die Aufnahme wird über OpenRouter mit dem gewählten Cloud-Modell transkribiert."
+          }
+        >
+          <Select
+            ariaLabel="Transkription"
+            value={form.transcription_backend}
+            onChange={(value) =>
+              set({ transcription_backend: value as Settings["transcription_backend"] })
+            }
+            options={[
+              { value: "local", label: "Lokal auf diesem Mac", hint: "Parakeet · offline" },
+              { value: "openrouter", label: "OpenRouter Cloud", hint: "Whisper Large V3" },
+            ]}
+          />
+        </Row>
+        {form.transcription_backend === "openrouter" && (
+          <>
+            <Row label="Cloud-Modell" hint="Alle Modelle werden mit privatem ZDR-Routing angefragt.">
+              <Select
+                ariaLabel="Cloud-Modell"
+                value={form.transcription_model}
+                onChange={(value) =>
+                  set({ transcription_model: value as Settings["transcription_model"] })
+                }
+                options={[
+                  {
+                    value: "openai/whisper-large-v3-turbo",
+                    label: "Whisper Large V3 Turbo",
+                    hint: "Schnell · $0,04 pro Stunde",
+                  },
+                  {
+                    value: "openai/whisper-large-v3",
+                    label: "Whisper Large V3",
+                    hint: "Whisper-Qualitätsmodus · ab $0,0015 pro Minute",
+                  },
+                  {
+                    value: "microsoft/mai-transcribe-1.5",
+                    label: "MAI-Transcribe 1.5 · Preview",
+                    hint: "Neues Microsoft-Modell · $0,36 pro Stunde",
+                  },
+                ]}
+              />
+            </Row>
+            <Row label="Sprache" hint="Automatisch erkennt auch wechselndes Deutsch und Englisch.">
+              <Select
+                ariaLabel="Sprache der Transkription"
+                value={form.transcription_language}
+                onChange={(value) =>
+                  set({ transcription_language: value as Settings["transcription_language"] })
+                }
+                options={[
+                  { value: "auto", label: "Automatisch" },
+                  { value: "de", label: "Deutsch" },
+                  { value: "en", label: "Englisch" },
+                ]}
+              />
+            </Row>
+            <Row
+              label="API-Zugang"
+              hint={
+                form.openrouter_api_key.trim()
+                  ? "OpenRouter-Schlüssel ist eingetragen."
+                  : "Schlüssel im Abschnitt „OpenRouter & Nachbearbeitung“ eintragen."
+              }
+            >
+              <span className={`status-pill ${form.openrouter_api_key.trim() ? "ok" : "warn"}`}>
+                {form.openrouter_api_key.trim() ? "Bereit" : "Schlüssel fehlt"}
+              </span>
+            </Row>
+            <SwitchRow
+              label="Bei Cloud-Fehler lokal fortfahren"
+              hint="Wenn OpenRouter nicht erreichbar ist, nutzt VoiZe das installierte Parakeet-Modell."
+              checked={form.cloud_fallback_to_local}
+              onChange={(cloud_fallback_to_local) => set({ cloud_fallback_to_local })}
+            />
+            <Row
+              wide
+              label="Cloud-Verarbeitung"
+              hint="Jede Sprachaufnahme wird an OpenRouter und den Modellanbieter übertragen. VoiZe fordert Zero Data Retention an und speichert das Audio selbst nicht. Zur vollständig lokalen Verarbeitung oben „Lokal auf diesem Mac“ wählen."
+            />
+          </>
+        )}
+      </Group>
+
+      <Group title="OpenRouter & Nachbearbeitung">
         <Row label="API-Schlüssel" hint="Wird sicher in der macOS-Keychain gespeichert.">
           <input
             type="password"
@@ -1197,10 +1302,36 @@ function UsageOverview({ reloadKey }: { reloadKey: number }) {
             <span className="usage-stat-value">{formatUsd(summary?.cost ?? 0)}</span>
             <span className="usage-stat-label">Gesamtkosten</span>
           </div>
-          <div className="usage-stat">
-            <span className="usage-stat-value">{fmtInt(summary?.post_processed_count ?? 0)}</span>
-            <span className="usage-stat-label">KI-Diktate</span>
-          </div>
+          {(summary?.transcription_cost ?? 0) > 0 && (
+            <div className="usage-stat">
+              <span className="usage-stat-value">{formatUsd(summary?.transcription_cost ?? 0)}</span>
+              <span className="usage-stat-label">Cloud-Transkription</span>
+            </div>
+          )}
+          {(summary?.postprocess_cost ?? 0) > 0 && (
+            <div className="usage-stat">
+              <span className="usage-stat-value">{formatUsd(summary?.postprocess_cost ?? 0)}</span>
+              <span className="usage-stat-label">KI-Nachbearbeitung</span>
+            </div>
+          )}
+          {(summary?.background_cost ?? 0) > 0 && (
+            <div className="usage-stat">
+              <span className="usage-stat-value">{formatUsd(summary?.background_cost ?? 0)}</span>
+              <span className="usage-stat-label">Wörterbuch-Lernen</span>
+            </div>
+          )}
+          {(summary?.cloud_transcribed_count ?? 0) > 0 && (
+            <div className="usage-stat">
+              <span className="usage-stat-value">{fmtInt(summary?.cloud_transcribed_count ?? 0)}</span>
+              <span className="usage-stat-label">Cloud-Diktate</span>
+            </div>
+          )}
+          {(summary?.post_processed_count ?? 0) > 0 && (
+            <div className="usage-stat">
+              <span className="usage-stat-value">{fmtInt(summary?.post_processed_count ?? 0)}</span>
+              <span className="usage-stat-label">KI-Diktate</span>
+            </div>
+          )}
           <div className="usage-stat">
             <span className="usage-stat-value">{fmtInt(summary?.prompt_tokens ?? 0)}</span>
             <span className="usage-stat-label">Input-Tokens</span>
@@ -1361,8 +1492,15 @@ function History() {
                 <span className="row-hint">
                   {new Date(entry.created_at).toLocaleString()} ·{" "}
                   {entry.focused_app || "Unbekannte App"} ·{" "}
-                  {entry.post_processed ? "KI formatiert" : "Lokal"}
-                  {entry.cost != null ? ` · ${formatUsd(entry.cost)}` : ""}
+                  {entry.transcription_fallback_used
+                    ? "Cloud → lokal"
+                    : entry.transcription_backend === "openrouter"
+                      ? "Cloud"
+                      : "Lokal"}
+                  {entry.post_processed ? " · KI formatiert" : ""}
+                  {(entry.cost ?? 0) + (entry.transcription_cost ?? 0) > 0
+                    ? ` · ${formatUsd((entry.cost ?? 0) + (entry.transcription_cost ?? 0))}`
+                    : ""}
                 </span>
                 <div className="btn-row">
                   <button

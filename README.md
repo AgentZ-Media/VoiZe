@@ -7,13 +7,13 @@
 **Sprechen statt tippen — überall auf deinem Mac.**
 
 Taste halten, sprechen, loslassen. Dein Text erscheint direkt dort, wo dein Cursor steht.
-100 % lokal, ohne Abo, ohne Cloud.
+Standardmäßig 100 % lokal und ohne Abo. Optional kannst du über deinen eigenen OpenRouter-Key in der Cloud transkribieren.
 
 [![Download](https://img.shields.io/github/v/release/AgentZ-Media/VoiZe?label=Download&color=6e56cf&style=for-the-badge)](https://github.com/AgentZ-Media/VoiZe/releases/latest)
 &nbsp;
 ![macOS](https://img.shields.io/badge/macOS-Apple%20Silicon-111?style=for-the-badge&logo=apple)
 &nbsp;
-![Privat](https://img.shields.io/badge/Transkription-100%25%20lokal-2da44e?style=for-the-badge)
+![Privat](https://img.shields.io/badge/Transkription-Local--first-2da44e?style=for-the-badge)
 
 </div>
 
@@ -24,7 +24,7 @@ Taste halten, sprechen, loslassen. Dein Text erscheint direkt dort, wo dein Curs
 <table>
 <tr>
 <td align="center" width="33%"><h3>1&nbsp;&nbsp;🎙️</h3><b><kbd>Fn</kbd> gedrückt halten</b><br/><sub>In jeder App — Mail, Browser, Editor, Slack, Terminal. Eine dezente Pille am unteren Bildschirmrand zeigt, dass VoiZe zuhört.</sub></td>
-<td align="center" width="33%"><h3>2&nbsp;&nbsp;💬</h3><b>Einfach sprechen</b><br/><sub>Deutsch, Englisch oder gemischt. Die Spracherkennung läuft komplett auf deinem Mac — nichts verlässt dein Gerät.</sub></td>
+<td align="center" width="33%"><h3>2&nbsp;&nbsp;💬</h3><b>Einfach sprechen</b><br/><sub>Deutsch, Englisch oder gemischt. Standardmäßig läuft die Spracherkennung komplett auf deinem Mac; Cloud-Transkription ist ein bewusstes Opt-in.</sub></td>
 <td align="center" width="33%"><h3>3&nbsp;&nbsp;✨</h3><b>Loslassen — fertig</b><br/><sub>Der Text landet sofort im aktiven Eingabefeld oder in der Zwischenablage. Auf Wunsch von KI ausformuliert.</sub></td>
 </tr>
 </table>
@@ -34,7 +34,7 @@ Taste halten, sprechen, loslassen. Dein Text erscheint direkt dort, wo dein Curs
 |  | **VoiZe** | Wispr Flow | superwhisper | macOS Diktat |
 |---|:---:|:---:|:---:|:---:|
 | **Preis** | **Kostenlos** | Abo | Abo / Kauf | Kostenlos |
-| **Transkription lokal** | ✅ immer | ❌ Cloud | ✅ optional | teilweise |
+| **Transkription lokal** | ✅ Standard | ❌ Cloud | ✅ optional | teilweise |
 | **Funktioniert in jeder App** | ✅ | ✅ | ✅ | eingeschränkt |
 | **Push-to-talk (Taste halten)** | ✅ `Fn` | ✅ | ✅ | ❌ |
 | **KI-Nachbearbeitung** | ✅ optional, eigener API-Key | ✅ | ✅ | ❌ |
@@ -51,7 +51,7 @@ VoiZe nutzt **NVIDIA Parakeet** (eines der präzisesten offenen Sprachmodelle) d
 - 🧠 **KI-Feinschliff (optional)** — Formatierung, Absätze und Listen über OpenRouter mit deinem eigenen API-Key
 - 📖 **Lernendes Wörterbuch** — Eigennamen und Fachbegriffe werden erkannt und automatisch vorgeschlagen
 - 🕘 **Lokaler Verlauf** — jedes Diktat lässt sich später durchsuchen und erneut kopieren
-- 🔒 **Privat by Design** — Audio wird nie gespeichert und nie hochgeladen
+- 🔒 **Privat by Design** — Audio wird nie gespeichert; hochgeladen wird es nur im ausdrücklich gewählten Cloud-Modus
 - 🖥️ **Native Menüleisten-App** — kein Dock-Icon, kein Fenster im Weg, echtes macOS-Material
 
 ## Tastenkürzel
@@ -118,7 +118,7 @@ git push origin v0.1.0
 
 Benötigtes Repo-Secret: `TAURI_SIGNING_PRIVATE_KEY`
 
-### OpenRouter-Key (optional, für KI-Nachbearbeitung)
+### OpenRouter-Key (optional, für Cloud-Transkription und KI-Nachbearbeitung)
 
 Wird lokal in der macOS-Keychain gespeichert — nie in `settings.json`, nie im Repo. Eintragen unter **Einstellungen → KI** oder direkt:
 
