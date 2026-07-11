@@ -69,15 +69,18 @@ export class VoiceRecorder {
   private startedAt = 0;
 
   get running() {
-    return this.ctx !== null;
+    return this.recorder?.state === "recording";
   }
 
-  async start(onLevel: (value: number) => void): Promise<void> {
-    if (this.ctx) return;
+  async start(
+    onLevel: (value: number) => void,
+    onFailure?: (error: Error) => void,
+  ): Promise<void> {
+    if (this.recorder) return;
     this.parts = [];
     this.peak = 0;
     this.smoothedLevel = 0;
-    this.startedAt = performance.now();
+    this.startedAt = 0;
 
     // Echo cancellation / noise suppression / AGC stay off: WKWebView's audio
     // processing chain ramps up for ~0.6-1 s after the track opens and delivers
@@ -90,63 +93,129 @@ export class VoiceRecorder {
         autoGainControl: false,
       },
     });
+    this.stream = stream;
 
-    // Capture with MediaRecorder, not a live AudioWorklet. MediaRecorder
-    // buffers the *complete* take from the first frame; the worklet approach
-    // dropped the opening while its module compiled (addModule is async) and
-    // the trailing blocks still in flight at stop — that is what made words go
-    // missing at the start and end. Decode + resample happens after stop.
-    this.mime = pickMime();
-    const recorder = this.mime
-      ? new MediaRecorder(stream, { mimeType: this.mime })
-      : new MediaRecorder(stream);
-    if (!this.mime) this.mime = recorder.mimeType || "audio/mp4";
-    recorder.ondataavailable = (event) => {
-      if (event.data.size > 0) this.parts.push(event.data);
-    };
-    recorder.start();
+    try {
+      // Capture with MediaRecorder, not a live AudioWorklet. MediaRecorder
+      // buffers the *complete* take from the first frame; the worklet approach
+      // dropped the opening while its module compiled (addModule is async) and
+      // the trailing blocks in flight at stop — that is what made words go
+      // missing at the start and end. Decode + resample happens after stop.
+      this.mime = pickMime();
+      const recorder = this.mime
+        ? new MediaRecorder(stream, { mimeType: this.mime })
+        : new MediaRecorder(stream);
+      this.recorder = recorder;
+      if (!this.mime) this.mime = recorder.mimeType || "audio/mp4";
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) this.parts.push(event.data);
+      };
 
+      // MediaRecorder.start() only schedules the start. Its `start` event is the
+      // browser's confirmation that media is actually being gathered. Do not let
+      // the HUD or ready sound run ahead of this promise: getUserMedia may take a
+      // different amount of time every time the microphone is opened.
+      await new Promise<void>((resolve, reject) => {
+        const onStart = () => {
+          recorder.removeEventListener("error", onError);
+          resolve();
+        };
+        const onError = (event: Event) => {
+          recorder.removeEventListener("start", onStart);
+          const error = (event as Event & { error?: DOMException }).error;
+          reject(error ?? new Error("Audioaufnahme konnte nicht gestartet werden."));
+        };
+        recorder.addEventListener("start", onStart, { once: true });
+        recorder.addEventListener("error", onError, { once: true });
+        recorder.start();
+      });
+      this.startedAt = performance.now();
+      recorder.onerror = (event) => {
+        const error = (event as Event & { error?: DOMException }).error;
+        onFailure?.(error ?? new Error("Die Audioaufnahme wurde unterbrochen."));
+      };
+      // The meter is cosmetic and must never delay the ready signal. Recording
+      // is already active; initialize the Web Audio graph independently.
+      void this.startLevelMeter(stream, onLevel);
+    } catch (error) {
+      const recorder = this.recorder;
+      const ctx = this.ctx;
+      if (recorder) {
+        recorder.ondataavailable = null;
+        recorder.onerror = null;
+        if (recorder.state !== "inactive") recorder.stop();
+      }
+      this.analyser?.disconnect();
+      this.sink?.disconnect();
+      stream.getTracks().forEach((track) => track.stop());
+      this.recorder = null;
+      this.analyser = null;
+      this.sink = null;
+      this.stream = null;
+      this.ctx = null;
+      this.startedAt = 0;
+      this.parts = [];
+      await ctx?.close().catch(() => {});
+      throw error;
+    }
+  }
+
+  private async startLevelMeter(
+    stream: MediaStream,
+    onLevel: (value: number) => void,
+  ): Promise<void> {
     // Separate live-level path: source -> analyser -> silent sink -> destination.
     // The sink (gain 0) keeps the graph pulled so WebKit actually advances the
-    // analyser — an analyser with no path to the destination goes stale in
-    // WKWebView. This drives only the waveform; the recording comes from
-    // MediaRecorder above.
+    // analyser. This path drives only the waveform and may fail independently;
+    // the recording itself comes from MediaRecorder above.
     const ctx = new AudioContext();
-    await ctx.resume();
-    const analyser = ctx.createAnalyser();
-    analyser.fftSize = 1024;
-    const sink = ctx.createGain();
-    sink.gain.value = 0;
-    ctx.createMediaStreamSource(stream).connect(analyser);
-    analyser.connect(sink);
-    sink.connect(ctx.destination);
-    this.timeBuf = new Float32Array(analyser.fftSize);
-
+    if (this.stream !== stream || this.recorder?.state !== "recording") {
+      await ctx.close().catch(() => {});
+      return;
+    }
     this.ctx = ctx;
-    this.stream = stream;
-    this.recorder = recorder;
-    this.analyser = analyser;
-    this.sink = sink;
-
-    const updateLevel = () => {
-      if (!this.ctx || !this.analyser) return;
-      this.analyser.getFloatTimeDomainData(this.timeBuf);
-      let sum = 0;
-      for (let i = 0; i < this.timeBuf.length; i += 1) {
-        sum += this.timeBuf[i] * this.timeBuf[i];
+    try {
+      await ctx.resume();
+      if (
+        this.ctx !== ctx ||
+        this.stream !== stream ||
+        this.recorder?.state !== "recording"
+      ) {
+        await ctx.close().catch(() => {});
+        return;
       }
-      const rms = Math.sqrt(sum / this.timeBuf.length);
-      this.peak = Math.max(rms, this.peak * 0.996, 0.01);
-      const norm = Math.min(1, rms / this.peak);
-      // perceptual curve: quiet speech still moves the bars visibly
-      const target = Math.pow(norm, 0.6);
-      // fast attack, slower release — speech onsets hit immediately
-      const blend = target > this.smoothedLevel ? 0.55 : 0.25;
-      this.smoothedLevel = this.smoothedLevel * (1 - blend) + target * blend;
-      onLevel(this.smoothedLevel);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      const sink = ctx.createGain();
+      sink.gain.value = 0;
+      ctx.createMediaStreamSource(stream).connect(analyser);
+      analyser.connect(sink);
+      sink.connect(ctx.destination);
+      this.timeBuf = new Float32Array(analyser.fftSize);
+      this.analyser = analyser;
+      this.sink = sink;
+
+      const updateLevel = () => {
+        if (this.ctx !== ctx || this.analyser !== analyser) return;
+        analyser.getFloatTimeDomainData(this.timeBuf);
+        let sum = 0;
+        for (let i = 0; i < this.timeBuf.length; i += 1) {
+          sum += this.timeBuf[i] * this.timeBuf[i];
+        }
+        const rms = Math.sqrt(sum / this.timeBuf.length);
+        this.peak = Math.max(rms, this.peak * 0.996, 0.01);
+        const norm = Math.min(1, rms / this.peak);
+        const target = Math.pow(norm, 0.6);
+        const blend = target > this.smoothedLevel ? 0.55 : 0.25;
+        this.smoothedLevel = this.smoothedLevel * (1 - blend) + target * blend;
+        onLevel(this.smoothedLevel);
+        this.levelFrame = window.requestAnimationFrame(updateLevel);
+      };
       this.levelFrame = window.requestAnimationFrame(updateLevel);
-    };
-    this.levelFrame = window.requestAnimationFrame(updateLevel);
+    } catch {
+      if (this.ctx === ctx) this.ctx = null;
+      await ctx.close().catch(() => {});
+    }
   }
 
   /// Stop the recorder and resolve with the finished blob — onstop flushes
@@ -155,6 +224,7 @@ export class VoiceRecorder {
     return new Promise((resolve) => {
       const r = this.recorder;
       this.recorder = null;
+      if (r) r.onerror = null;
       const collect = () =>
         this.parts.length ? new Blob(this.parts, { type: this.mime }) : null;
       if (!r || r.state === "inactive") {
@@ -168,7 +238,7 @@ export class VoiceRecorder {
 
   async stop(): Promise<Recording> {
     const ctx = this.ctx;
-    if (!ctx) {
+    if (!this.recorder || !this.startedAt) {
       throw new Error("Recorder is not running.");
     }
     const durationMs = Math.max(0, performance.now() - this.startedAt);
@@ -184,7 +254,7 @@ export class VoiceRecorder {
     this.sink = null;
     this.stream = null;
     this.ctx = null;
-    await ctx.close().catch(() => {});
+    await ctx?.close().catch(() => {});
     this.parts = [];
 
     const pcmB64 = blob ? await blobToPcm16kBase64(blob) : "";

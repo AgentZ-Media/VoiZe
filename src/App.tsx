@@ -382,25 +382,38 @@ export default function App() {
       hideSoon(3200);
       return;
     }
+    // Remove any previous success/error state while the microphone opens. The
+    // pill becomes visible again only at the confirmed readiness boundary.
+    hidePill();
     phase.current = "starting";
     pending.current = "none";
     recordingSettingsRef.current = { ...activeSettings };
     setError("");
-    setCaption("Hört zu");
-    setState("recording");
     contextPromiseRef.current = activeSettings.context_enabled
       ? screenContext().catch(() => null)
       : Promise.resolve(null);
     try {
-      showPill();
-      if (activeSettings.start_sound_enabled) void playStatusSound("start");
-      await recorder.current.start(setLevel);
+      await recorder.current.start(setLevel, (failure) => {
+        // MediaRecorder queues dataavailable/stop directly after an error.
+        // Defer cleanup by one task so those final events can settle first.
+        window.setTimeout(() => void handleRecordingFailure(failure), 0);
+      });
       phase.current = "recording";
       // the release/cancel may have arrived while getUserMedia was opening
       const queued = pending.current as PendingAction;
       pending.current = "none";
-      if (queued === "stop") void stopRecording();
-      else if (queued === "cancel") void cancelRecording();
+      if (queued === "stop") {
+        void stopRecording();
+      } else if (queued === "cancel") {
+        void cancelRecording();
+      } else {
+        // This is the user-facing readiness boundary: VoiceRecorder resolves
+        // only after MediaRecorder has confirmed its `start` event.
+        setCaption("Hört zu");
+        setState("recording");
+        showPill();
+        if (activeSettings.start_sound_enabled) void playStatusSound("start");
+      }
     } catch (e) {
       phase.current = "idle";
       pending.current = "none";
@@ -408,9 +421,27 @@ export default function App() {
       setError(String(e));
       setCaption("Mikrofon nicht verfügbar");
       setState("error");
+      showPill();
       void playStatusSound("error");
       hideSoon(2600);
     }
+  }
+
+  async function handleRecordingFailure(failure: Error) {
+    if (phase.current !== "recording") return;
+    phase.current = "processing";
+    pending.current = "none";
+    await recorder.current.stop().catch(() => null);
+    contextPromiseRef.current = null;
+    recordingSettingsRef.current = null;
+    phase.current = "idle";
+    setLevel(0);
+    setError(String(failure));
+    setCaption("Aufnahme unterbrochen");
+    setState("error");
+    showPill();
+    void playStatusSound("error");
+    hideSoon(3200);
   }
 
   async function stopRecording() {
