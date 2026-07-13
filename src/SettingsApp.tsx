@@ -2,6 +2,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import {
   BarChart3,
+  AppWindow,
   Bot,
   Clock3,
   Info,
@@ -21,6 +22,7 @@ const NAV: { id: SettingsSection; label: string; icon: ComponentType<{ size?: nu
   { id: "general", label: "Allgemein", icon: Settings },
   { id: "shortcuts", label: "Kurzbefehle", icon: Keyboard },
   { id: "ai", label: "KI", icon: Bot },
+  { id: "apps", label: "Apps", icon: AppWindow },
   { id: "dictionary", label: "Wörterbuch", icon: Library },
   { id: "history", label: "Verlauf", icon: Clock3 },
   { id: "diagnostics", label: "Diagnose", icon: Wrench },

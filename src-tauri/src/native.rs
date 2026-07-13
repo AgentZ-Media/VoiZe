@@ -1,12 +1,13 @@
 use std::cell::{Cell, RefCell};
+use std::ffi::{c_char, c_void, CStr};
 use std::ptr::NonNull;
 use std::rc::Rc;
 use std::sync::{mpsc, Mutex, OnceLock};
 use std::time::Duration;
 
-use objc2::MainThreadMarker;
 use objc2::rc::Retained;
 use objc2::runtime::AnyObject;
+use objc2::MainThreadMarker;
 use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags, NSScreen};
 use tauri::{Emitter, Manager, PhysicalPosition};
 use tauri_plugin_clipboard_manager::ClipboardExt;
@@ -45,10 +46,88 @@ pub(crate) fn on_main<T: Send + 'static>(
 #[link(name = "ApplicationServices", kind = "framework")]
 extern "C" {
     fn AXIsProcessTrusted() -> bool;
+    fn AXUIElementCreateApplication(pid: i32) -> *const c_void;
+    fn AXUIElementSetMessagingTimeout(element: *const c_void, timeout_in_seconds: f32) -> i32;
+    fn AXUIElementCopyAttributeValue(
+        element: *const c_void,
+        attribute: *const c_void,
+        value: *mut *const c_void,
+    ) -> i32;
 }
 
 pub(crate) fn accessibility_trusted() -> bool {
     unsafe { AXIsProcessTrusted() }
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn focused_window_title(pid: i32) -> Option<String> {
+    if !accessibility_trusted() {
+        return None;
+    }
+    unsafe {
+        let application = AXUIElementCreateApplication(pid);
+        if application.is_null() {
+            return None;
+        }
+        let _ = AXUIElementSetMessagingTimeout(application, 0.25);
+        let focused_window_attr = cf_string(b"AXFocusedWindow\0")?;
+        let mut window: *const c_void = std::ptr::null();
+        let window_status =
+            AXUIElementCopyAttributeValue(application, focused_window_attr, &mut window);
+        CFRelease(focused_window_attr);
+        CFRelease(application);
+        if window_status != 0 || window.is_null() {
+            return None;
+        }
+
+        let title_attr = cf_string(b"AXTitle\0")?;
+        let mut title: *const c_void = std::ptr::null();
+        let title_status = AXUIElementCopyAttributeValue(window, title_attr, &mut title);
+        CFRelease(title_attr);
+        CFRelease(window);
+        if title_status != 0 || title.is_null() {
+            return None;
+        }
+
+        let value = cf_string_to_rust(title);
+        CFRelease(title);
+        value.filter(|title| !title.trim().is_empty())
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn cf_string(bytes: &'static [u8]) -> Option<*const c_void> {
+    let value = CFStringCreateWithCString(
+        std::ptr::null(),
+        CStr::from_bytes_with_nul(bytes).ok()?.as_ptr(),
+        K_CF_STRING_ENCODING_UTF8,
+    );
+    (!value.is_null()).then_some(value)
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn cf_string_to_rust(value: *const c_void) -> Option<String> {
+    if CFGetTypeID(value) != CFStringGetTypeID() {
+        return None;
+    }
+    let length = CFStringGetLength(value);
+    let capacity = CFStringGetMaximumSizeForEncoding(length, K_CF_STRING_ENCODING_UTF8) + 1;
+    if capacity <= 1 {
+        return Some(String::new());
+    }
+    let mut buffer = vec![0u8; capacity as usize];
+    if !CFStringGetCString(
+        value,
+        buffer.as_mut_ptr().cast::<c_char>(),
+        capacity,
+        K_CF_STRING_ENCODING_UTF8,
+    ) {
+        return None;
+    }
+    CStr::from_ptr(buffer.as_ptr().cast::<c_char>())
+        .to_str()
+        .ok()
+        .map(str::to_string)
 }
 
 #[tauri::command]
@@ -145,7 +224,8 @@ fn start_monitors_on_main(app: tauri::AppHandle) {
             let was_active = active.get();
             if now_active && !was_active {
                 active.set(true);
-                let _ = flags_app.emit("activation-start", ());
+                let context = crate::context::current_screen_context();
+                let _ = flags_app.emit("activation-start", context);
             } else if !now_active && was_active {
                 active.set(false);
                 let _ = flags_app.emit("activation-stop", ());
@@ -161,7 +241,8 @@ fn start_monitors_on_main(app: tauri::AppHandle) {
                 .map(|h| h.clone())
                 .unwrap_or_else(|_| "Fn+Space".into());
             if chord_active(event.modifierFlags(), event.keyCode(), &hotkey) {
-                let _ = key_app.emit("handsfree-toggle", ());
+                let context = crate::context::current_screen_context();
+                let _ = key_app.emit("handsfree-toggle", context);
             } else if chord_active(event.modifierFlags(), event.keyCode(), "Esc") {
                 let _ = key_app.emit("activation-cancel", ());
             }
@@ -209,7 +290,10 @@ fn start_monitors_on_main(app: tauri::AppHandle) {
                 event.as_ptr()
             });
         if let Some(monitor) = unsafe {
-            NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &local_key_block)
+            NSEvent::addLocalMonitorForEventsMatchingMask_handler(
+                NSEventMask::KeyDown,
+                &local_key_block,
+            )
         } {
             monitors.push(monitor);
         }
@@ -258,9 +342,25 @@ extern "C" {
 
 #[link(name = "CoreFoundation", kind = "framework")]
 extern "C" {
-    fn CFRelease(cf: *const std::ffi::c_void);
+    fn CFRelease(cf: *const c_void);
+    fn CFGetTypeID(cf: *const c_void) -> usize;
+    fn CFStringGetTypeID() -> usize;
+    fn CFStringCreateWithCString(
+        alloc: *const c_void,
+        c_str: *const c_char,
+        encoding: u32,
+    ) -> *const c_void;
+    fn CFStringGetLength(value: *const c_void) -> isize;
+    fn CFStringGetMaximumSizeForEncoding(length: isize, encoding: u32) -> isize;
+    fn CFStringGetCString(
+        value: *const c_void,
+        buffer: *mut c_char,
+        buffer_size: isize,
+        encoding: u32,
+    ) -> bool;
 }
 
+const K_CF_STRING_ENCODING_UTF8: u32 = 0x0800_0100;
 const K_CG_HID_EVENT_TAP: u32 = 0;
 const K_CG_EVENT_FLAG_MASK_COMMAND: u64 = 1 << 20;
 const KEY_V: u16 = 0x09;
@@ -361,7 +461,7 @@ pub fn hud_collapsed(app: tauri::AppHandle, collapsed: bool) -> Result<(), Strin
                 frame.size.width = HUD_WIDTH as f64;
                 frame.size.height = HUD_HEIGHT as f64;
             }
-            unsafe { ns_window.setFrame_display(frame, false) };
+            ns_window.setFrame_display(frame, false);
         })?;
     }
     Ok(())

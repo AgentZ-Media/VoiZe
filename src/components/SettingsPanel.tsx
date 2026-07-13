@@ -18,10 +18,12 @@ import {
   dictionaryList,
   dictionaryUpsert,
   historyDelete,
+  historyApps,
   historyList,
   insightsSummary,
   learnRunNow,
   learnStatus,
+  pickApplication,
   requestAccessibility,
   saveSettings,
   getSettings,
@@ -33,9 +35,11 @@ import {
 import type {
   AsrDownloadProgress,
   AsrStatus,
+  ApplicationIdentity,
   DictionaryEntry,
   DictSuggestion,
   HistoryEntry,
+  HistoryApp,
   InsightsSummary,
   LearnStatus,
   Settings,
@@ -49,6 +53,7 @@ export type SettingsSection =
   | "general"
   | "shortcuts"
   | "ai"
+  | "apps"
   | "dictionary"
   | "history"
   | "diagnostics"
@@ -161,6 +166,7 @@ export default function SettingsPanel({ section, settings, onSettings }: Props) 
       {section === "general" && <General form={form} set={set} />}
       {section === "shortcuts" && <Shortcuts form={form} set={set} />}
       {section === "ai" && <AI form={form} set={set} />}
+      {section === "apps" && <Apps form={form} set={set} />}
       {section === "dictionary" && <Dictionary />}
       {section === "history" && <History />}
       {section === "diagnostics" && <Diagnostics />}
@@ -841,11 +847,11 @@ function AI({
         </Row>
       </Group>
 
-      <Group title="Eigene Anweisung">
+      <Group title="Allgemeine Anweisung">
         <Row
           wide
           label="Stil und Regeln"
-          hint="Zum Beispiel: Schreibe E-Mails knapp und direkt. Erkenne gesprochene Bulletpoints."
+          hint="Gilt in allen Apps. App-spezifische Regeln werden anschließend ergänzt."
         >
           <textarea
             rows={5}
@@ -853,6 +859,162 @@ function AI({
             onChange={(e) => set({ custom_instructions: e.target.value })}
           />
         </Row>
+      </Group>
+    </>
+  );
+}
+
+function Apps({
+  form,
+  set,
+}: {
+  form: Settings;
+  set: (patch: Partial<Settings>) => void;
+}) {
+  const [recentApps, setRecentApps] = useState<HistoryApp[]>([]);
+  const [picking, setPicking] = useState(false);
+  const [pickerError, setPickerError] = useState("");
+
+  useEffect(() => {
+    historyApps(30).then(setRecentApps).catch(() => setRecentApps([]));
+  }, []);
+
+  function addApp(app: ApplicationIdentity) {
+    const existing = form.app_prompts.some(
+      (entry) => entry.bundle_id.toLowerCase() === app.bundle_id.toLowerCase(),
+    );
+    if (existing) return;
+    set({
+      app_prompts: [
+        ...form.app_prompts,
+        { app_name: app.app_name, bundle_id: app.bundle_id, prompt: "" },
+      ],
+    });
+  }
+
+  async function chooseApp() {
+    setPicking(true);
+    setPickerError("");
+    try {
+      const app = await pickApplication();
+      if (app) addApp(app);
+    } catch (error) {
+      setPickerError(String(error));
+    } finally {
+      setPicking(false);
+    }
+  }
+
+  function updatePrompt(bundleId: string, prompt: string) {
+    set({
+      app_prompts: form.app_prompts.map((entry) =>
+        entry.bundle_id === bundleId ? { ...entry, prompt } : entry,
+      ),
+    });
+  }
+
+  function removeApp(bundleId: string) {
+    set({
+      app_prompts: form.app_prompts.filter((entry) => entry.bundle_id !== bundleId),
+    });
+  }
+
+  const configuredIds = new Set(
+    form.app_prompts.map((entry) => entry.bundle_id.toLowerCase()),
+  );
+  const suggestions = recentApps
+    .filter((app) => !configuredIds.has(app.bundle_id.toLowerCase()))
+    .slice(0, 8);
+
+  return (
+    <>
+      <Group title="App hinzufügen">
+        <div className="app-prompt-add">
+          <p className="app-prompt-intro">
+            Wähle eine App über den macOS-Dialog oder aus deinen letzten Diktaten. Die
+            Bundle-ID sorgt dafür, dass die Zuordnung auch nach Updates stabil bleibt.
+          </p>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="push primary"
+              disabled={picking}
+              onClick={() => void chooseApp()}
+            >
+              <Plus size={13} />
+              {picking ? "Öffnet Auswahl …" : "App auswählen …"}
+            </button>
+          </div>
+          {suggestions.length > 0 && (
+            <div className="recent-apps">
+              <span className="field-label">Zuletzt verwendet</span>
+              <div className="recent-app-list">
+                {suggestions.map((app) => (
+                  <button
+                    type="button"
+                    className="recent-app"
+                    key={app.bundle_id}
+                    onClick={() => addApp(app)}
+                    title={app.bundle_id}
+                  >
+                    <Plus size={12} />
+                    <span>{app.app_name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {pickerError && (
+            <p className="app-prompt-error" role="alert">
+              {pickerError}
+            </p>
+          )}
+        </div>
+      </Group>
+
+      <Group title="App-Regeln">
+        {form.app_prompts.length === 0 ? (
+          <div className="app-prompt-empty">
+            <strong>Noch keine App-Regel</strong>
+            <span>
+              Die allgemeine Nachbearbeitung bleibt unverändert aktiv. Ergänzungen greifen
+              nur, wenn die KI-Nachbearbeitung für das Diktat ausgeführt wird.
+            </span>
+          </div>
+        ) : (
+          form.app_prompts.map((entry) => (
+            <div className="app-prompt-rule" key={entry.bundle_id}>
+              <header>
+                <div className="app-prompt-identity">
+                  <strong>{entry.app_name}</strong>
+                  <code>{entry.bundle_id}</code>
+                </div>
+                <button
+                  type="button"
+                  className="ghost"
+                  aria-label={`Regel für ${entry.app_name} löschen`}
+                  onClick={() => removeApp(entry.bundle_id)}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </header>
+              <label className="field">
+                <span className="field-label">Zusätzliche Nachbearbeitung</span>
+                <textarea
+                  rows={4}
+                  maxLength={4000}
+                  value={entry.prompt}
+                  placeholder="Zum Beispiel: Formuliere persönlicher und verwende durchgehend die Anrede „Sie“."
+                  onChange={(event) => updatePrompt(entry.bundle_id, event.target.value)}
+                />
+              </label>
+              <span className="app-prompt-note">
+                Wird nach der allgemeinen Anweisung ergänzt und darf Stil, Ton und Anrede
+                anpassen, aber keine neuen Inhalte erfinden.
+              </span>
+            </div>
+          ))
+        )}
       </Group>
     </>
   );
@@ -1491,7 +1653,9 @@ function History() {
               <header>
                 <span className="row-hint">
                   {new Date(entry.created_at).toLocaleString()} ·{" "}
-                  {entry.focused_app || "Unbekannte App"} ·{" "}
+                  {[entry.focused_app, entry.window_title].filter(Boolean).join(" / ") ||
+                    "Unbekannte App"}{" "}
+                  ·{" "}
                   {entry.transcription_fallback_used
                     ? "Cloud → lokal"
                     : entry.transcription_backend === "openrouter"

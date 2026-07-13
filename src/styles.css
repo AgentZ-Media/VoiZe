@@ -488,6 +488,11 @@ textarea {
   line-height: 1.5;
 }
 
+input::placeholder,
+textarea::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
 /* macOS-Kippschalter, monochrom */
 .switch {
   appearance: none;
@@ -951,6 +956,125 @@ textarea {
 .select-check {
   flex: none;
   color: var(--ink);
+}
+
+/* App-spezifische Nachbearbeitung */
+.app-prompt-add {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+}
+
+.app-prompt-intro,
+.app-prompt-error {
+  margin: 0;
+  max-width: 70ch;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.app-prompt-error {
+  color: var(--danger);
+}
+
+.recent-apps {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.recent-app-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.recent-app {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--hair);
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.recent-app:hover {
+  background: var(--fill-2);
+  color: var(--ink);
+}
+
+.app-prompt-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 14px;
+  color: var(--ink-2);
+  font-size: 12px;
+}
+
+.app-prompt-empty strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app-prompt-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 14px;
+}
+
+.app-prompt-rule + .app-prompt-rule {
+  border-top: 1px solid var(--hair);
+}
+
+.app-prompt-rule header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.app-prompt-identity {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-prompt-identity strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.app-prompt-identity code {
+  overflow: hidden;
+  color: var(--ink-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-prompt-rule textarea {
+  width: 100%;
+  min-height: 82px;
+}
+
+.app-prompt-note {
+  color: var(--ink-2);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* Wörterbuch-Editor */

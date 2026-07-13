@@ -5,6 +5,13 @@ use tauri::Manager;
 
 use crate::fs_util::write_private;
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct AppPrompt {
+    pub app_name: String,
+    pub bundle_id: String,
+    pub prompt: String,
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default)]
 pub struct Settings {
@@ -28,6 +35,7 @@ pub struct Settings {
     pub asr_model_ready: bool,
     pub custom_instructions: String,
     pub learning_enabled: bool,
+    pub app_prompts: Vec<AppPrompt>,
 }
 
 impl Default for Settings {
@@ -53,6 +61,7 @@ impl Default for Settings {
             asr_model_ready: false,
             custom_instructions: String::new(),
             learning_enabled: true,
+            app_prompts: Vec::new(),
         }
     }
 }
@@ -64,7 +73,10 @@ fn config_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 fn normalize(settings: &mut Settings) {
-    if !matches!(settings.transcription_backend.as_str(), "local" | "openrouter") {
+    if !matches!(
+        settings.transcription_backend.as_str(),
+        "local" | "openrouter"
+    ) {
         settings.transcription_backend = "local".into();
     }
     // Keep cloud transcription intentionally curated instead of exposing the
@@ -77,7 +89,10 @@ fn normalize(settings: &mut Settings) {
     ) {
         settings.transcription_model = "openai/whisper-large-v3-turbo".into();
     }
-    if !matches!(settings.transcription_language.as_str(), "auto" | "de" | "en") {
+    if !matches!(
+        settings.transcription_language.as_str(),
+        "auto" | "de" | "en"
+    ) {
         settings.transcription_language = "auto".into();
     }
     if settings.postprocess_model.trim().is_empty() {
@@ -93,6 +108,21 @@ fn normalize(settings: &mut Settings) {
     if !matches!(settings.output_mode.as_str(), "insert" | "clipboard") {
         settings.output_mode = "insert".into();
     }
+    let mut seen = std::collections::HashSet::new();
+    settings.app_prompts.retain_mut(|entry| {
+        entry.bundle_id = entry.bundle_id.trim().to_string();
+        entry.app_name = entry.app_name.trim().to_string();
+        entry.prompt = entry.prompt.trim().to_string();
+        let key = entry.bundle_id.to_lowercase();
+        if key.is_empty() || !seen.insert(key) {
+            return false;
+        }
+        if entry.app_name.is_empty() {
+            entry.app_name = entry.bundle_id.clone();
+        }
+        true
+    });
+    settings.app_prompts.truncate(100);
 }
 
 #[cfg(target_os = "macos")]
@@ -104,14 +134,7 @@ fn keychain_service(field: &str) -> String {
 fn keychain_get(field: &str) -> Option<String> {
     let service = keychain_service(field);
     let out = std::process::Command::new("security")
-        .args([
-            "find-generic-password",
-            "-a",
-            "voize",
-            "-s",
-            &service,
-            "-w",
-        ])
+        .args(["find-generic-password", "-a", "voize", "-s", &service, "-w"])
         .output()
         .ok()?;
     if !out.status.success() {
@@ -158,13 +181,7 @@ fn keychain_set(_field: &str, _value: &str) -> Result<(), String> {
 fn keychain_delete(field: &str) {
     let service = keychain_service(field);
     let _ = std::process::Command::new("security")
-        .args([
-            "delete-generic-password",
-            "-a",
-            "voize",
-            "-s",
-            &service,
-        ])
+        .args(["delete-generic-password", "-a", "voize", "-s", &service])
         .status();
 }
 
@@ -216,8 +233,8 @@ pub fn store(app: &tauri::AppHandle, settings: &Settings) -> Result<(), String> 
     }
     let mut normalized = settings.clone();
     normalize(&mut normalized);
-    let raw = serde_json::to_string_pretty(&sanitize_for_disk(&normalized))
-        .map_err(|e| e.to_string())?;
+    let raw =
+        serde_json::to_string_pretty(&sanitize_for_disk(&normalized)).map_err(|e| e.to_string())?;
     write_private(&path, raw)
 }
 
@@ -239,9 +256,13 @@ mod tests {
     fn legacy_settings_default_to_local_transcription() {
         let settings: Settings = serde_json::from_str("{}").expect("default settings");
         assert_eq!(settings.transcription_backend, "local");
-        assert_eq!(settings.transcription_model, "openai/whisper-large-v3-turbo");
+        assert_eq!(
+            settings.transcription_model,
+            "openai/whisper-large-v3-turbo"
+        );
         assert_eq!(settings.transcription_language, "auto");
         assert!(settings.cloud_fallback_to_local);
+        assert!(settings.app_prompts.is_empty());
     }
 
     #[test]
@@ -252,7 +273,10 @@ mod tests {
         settings.transcription_language = "xx".into();
         normalize(&mut settings);
         assert_eq!(settings.transcription_backend, "local");
-        assert_eq!(settings.transcription_model, "openai/whisper-large-v3-turbo");
+        assert_eq!(
+            settings.transcription_model,
+            "openai/whisper-large-v3-turbo"
+        );
         assert_eq!(settings.transcription_language, "auto");
     }
 
@@ -266,5 +290,34 @@ mod tests {
         assert_eq!(settings.transcription_backend, "openrouter");
         assert_eq!(settings.transcription_model, "openai/whisper-large-v3");
         assert_eq!(settings.transcription_language, "de");
+    }
+
+    #[test]
+    fn normalize_app_prompts_uses_bundle_id_as_stable_key() {
+        let mut settings = Settings::default();
+        settings.app_prompts = vec![
+            AppPrompt {
+                app_name: " Mail ".into(),
+                bundle_id: " com.apple.mail ".into(),
+                prompt: " Persönlicher schreiben. ".into(),
+            },
+            AppPrompt {
+                app_name: "Duplikat".into(),
+                bundle_id: "COM.APPLE.MAIL".into(),
+                prompt: "Ignorieren".into(),
+            },
+            AppPrompt {
+                app_name: "Ohne Kennung".into(),
+                bundle_id: " ".into(),
+                prompt: "Ignorieren".into(),
+            },
+        ];
+
+        normalize(&mut settings);
+
+        assert_eq!(settings.app_prompts.len(), 1);
+        assert_eq!(settings.app_prompts[0].app_name, "Mail");
+        assert_eq!(settings.app_prompts[0].bundle_id, "com.apple.mail");
+        assert_eq!(settings.app_prompts[0].prompt, "Persönlicher schreiben.");
     }
 }

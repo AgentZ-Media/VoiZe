@@ -1,3 +1,9 @@
+export interface AppPrompt {
+  app_name: string;
+  bundle_id: string;
+  prompt: string;
+}
+
 export interface Settings {
   openrouter_api_key: string;
   transcription_backend: "local" | "openrouter";
@@ -22,6 +28,7 @@ export interface Settings {
   asr_model_ready: boolean;
   custom_instructions: string;
   learning_enabled: boolean;
+  app_prompts: AppPrompt[];
 }
 
 export interface TranscriptionResult {
@@ -46,6 +53,16 @@ export interface ScreenContext {
   window_title: string | null;
   selected_text: string | null;
   accessibility: boolean;
+}
+
+export interface ApplicationIdentity {
+  app_name: string;
+  bundle_id: string;
+}
+
+export interface HistoryApp extends ApplicationIdentity {
+  last_used_at: string;
+  dictation_count: number;
 }
 
 export interface HistoryEntry {

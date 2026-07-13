@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ApplicationIdentity,
   AsrStatus,
   ChatResult,
   DictionaryEntry,
   DictionaryInput,
   DictSuggestion,
   HistoryEntry,
+  HistoryApp,
   InsightsSummary,
   LearnRunResult,
   LearnStatus,
@@ -36,6 +38,8 @@ export const requestAccessibility = () =>
   invoke<boolean>("request_accessibility");
 
 export const screenContext = () => invoke<ScreenContext>("screen_context");
+export const pickApplication = () =>
+  invoke<ApplicationIdentity | null>("pick_application");
 
 export const asrStatus = () => invoke<AsrStatus>("asr_status");
 export const asrDownload = () => invoke<void>("asr_download");
@@ -73,6 +77,8 @@ export const historyInsert = (entry: NewHistoryEntry) =>
   invoke<HistoryEntry>("history_insert", { entry });
 export const historyList = (query?: string, limit?: number) =>
   invoke<HistoryEntry[]>("history_list", { query, limit });
+export const historyApps = (limit?: number) =>
+  invoke<HistoryApp[]>("history_apps", { limit });
 export const historyDelete = (id: number) =>
   invoke<boolean>("history_delete", { id });
 export const usageSummary = (from?: string | null, to?: string | null) =>

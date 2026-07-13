@@ -137,6 +137,14 @@ pub struct HistoryEntry {
     pub transcription_fallback_used: bool,
 }
 
+#[derive(Serialize)]
+pub struct HistoryApp {
+    pub app_name: String,
+    pub bundle_id: String,
+    pub last_used_at: String,
+    pub dictation_count: i64,
+}
+
 #[derive(Deserialize)]
 pub struct NewHistoryEntry {
     pub focused_app: Option<String>,
@@ -312,6 +320,39 @@ pub fn history_list(
         }
     }
     Ok(entries)
+}
+
+#[tauri::command]
+pub fn history_apps(app: tauri::AppHandle, limit: Option<u32>) -> Result<Vec<HistoryApp>, String> {
+    let db = conn(&app)?;
+    let lim = limit.unwrap_or(20).min(100);
+    let mut stmt = db
+        .prepare(
+            r#"
+            SELECT COALESCE(MAX(NULLIF(TRIM(focused_app), '')), bundle_id) AS app_name,
+                   bundle_id,
+                   MAX(created_at) AS last_used_at,
+                   COUNT(*) AS dictation_count
+            FROM history
+            WHERE bundle_id IS NOT NULL AND TRIM(bundle_id) <> ''
+            GROUP BY bundle_id
+            ORDER BY last_used_at DESC
+            LIMIT ?1
+            "#,
+        )
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([lim], |row| {
+            Ok(HistoryApp {
+                app_name: row.get(0)?,
+                bundle_id: row.get(1)?,
+                last_used_at: row.get(2)?,
+                dictation_count: row.get(3)?,
+            })
+        })
+        .map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())
 }
 
 fn row_to_history(row: &rusqlite::Row<'_>) -> rusqlite::Result<HistoryEntry> {
@@ -592,9 +633,11 @@ pub fn dictionary_upsert(
             ],
         )
         .map_err(|e| e.to_string())?;
-        let id = db.query_row("SELECT id FROM dictionary WHERE term = ?1", [term], |r| {
-            r.get::<_, i64>(0)
-        }).map_err(|e| e.to_string())?;
+        let id = db
+            .query_row("SELECT id FROM dictionary WHERE term = ?1", [term], |r| {
+                r.get::<_, i64>(0)
+            })
+            .map_err(|e| e.to_string())?;
         dictionary_get(&db, id)
     }
 }
