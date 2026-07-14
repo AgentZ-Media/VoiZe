@@ -780,11 +780,10 @@ textarea::placeholder {
 
 .select-popover {
   position: fixed;
-  z-index: 20;
-  width: min(480px, calc(100vw - 64px));
+  z-index: 30;
   max-height: 360px;
-  margin-top: 6px;
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--hair-2);
@@ -819,6 +818,7 @@ textarea::placeholder {
 }
 
 .model-list {
+  min-height: 0;
   max-height: 280px;
   overflow: auto;
   display: grid;

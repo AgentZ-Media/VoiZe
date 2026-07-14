@@ -219,7 +219,12 @@ pub async fn transcribe_cloud(
 pub async fn openrouter_models(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
     let settings = settings::load(&app)?;
     let res = client()?
-        .get("https://openrouter.ai/api/v1/models?sort=throughput-high-to-low")
+        .get("https://openrouter.ai/api/v1/models")
+        .query(&[
+            ("input_modalities", "text"),
+            ("output_modalities", "text"),
+            ("sort", "throughput-high-to-low"),
+        ])
         .headers(headers(&settings.openrouter_api_key)?)
         .send()
         .await
